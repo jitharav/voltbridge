@@ -393,7 +393,7 @@ export default function VoltBridge() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-          <div style={styles.stdTag}>IS 17017 · ACAN</div>
+          <div style={styles.stdTag}>IS 17017 · CCS2 / ISO 15118 · ACAN</div>
           <ModeToggle mode={s.mode} onChange={setMode} disabled={s.phase !== PHASE.IDLE} />
           <StatePill phase={s.phase} accent={accent} />
         </div>
@@ -483,11 +483,14 @@ export default function VoltBridge() {
         <section style={styles.col}>
           <div style={{ ...styles.panel, flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
             <PanelHead>
-              ACAN BUS · IS 17017
+              INTERNAL ACAN CONTROL BUS
               <span style={{ marginLeft: "auto", fontSize: 10, color: s.injected === "comms" ? C.fault : C.ok, fontFamily: "IBM Plex Mono, monospace" }}>
                 {s.injected === "comms" ? "● LINK LOST" : "● LINK UP"}
               </span>
             </PanelHead>
+            <div style={styles.busCaption}>
+              External charging link: CCS2 / ISO 15118 (PLC) · shown below: on-board control &amp; protection
+            </div>
             <CanLog rows={s.can} />
           </div>
         </section>
@@ -886,6 +889,15 @@ const styles = {
     borderRadius: 4,
     padding: "5px 9px",
     letterSpacing: 1,
+  },
+  busCaption: {
+    fontFamily: "IBM Plex Mono, monospace",
+    fontSize: 9.5,
+    lineHeight: 1.4,
+    color: C.faint,
+    borderLeft: `2px solid ${C.line}`,
+    paddingLeft: 8,
+    marginBottom: 8,
   },
   toggleWrap: {
     display: "flex",
