@@ -1,0 +1,87 @@
+VERSION "VoltBridge-ACAN-1.0"
+
+
+NS_ : 
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: EVSE EV
+
+
+BO_ 256 EVSE_Handshake: 8 EVSE
+ SG_ EVSE_MaxCurrent : 24|16@1+ (1,0) [0|1000] "A"  EV
+ SG_ EVSE_MaxVoltage : 8|16@1+ (1,0) [0|1500] "V"  EV
+ SG_ ProtocolVersion : 0|8@1+ (1,0) [0|0] ""  EV
+
+BO_ 257 EV_Handshake: 8 EV
+ SG_ Target_SoC : 24|8@1+ (1,0) [0|100] "%"  EVSE
+ SG_ Pack_Voltage : 8|16@1+ (1,0) [0|1500] "V"  EVSE
+ SG_ ProtocolVersion : 0|8@1+ (1,0) [0|0] ""  EVSE
+
+BO_ 512 Insulation_Status: 8 EV
+ SG_ Iso_OK : 16|8@1+ (1,0) [0|1] ""  EVSE
+ SG_ Resistance : 0|16@1+ (0.1,0) [0|6553.5] "MOhm"  EVSE
+
+BO_ 768 Precharge_Cmd: 8 EVSE
+ SG_ Enable : 0|8@1+ (1,0) [0|1] ""  EV
+
+BO_ 769 Charge_Parameters: 8 EVSE
+ SG_ Limit_Current : 16|16@1+ (1,0) [0|1000] "A"  EV
+ SG_ Limit_Voltage : 0|16@1+ (1,0) [0|1500] "V"  EV
+
+BO_ 770 Charge_Request: 8 EV
+ SG_ Target_Current : 16|16@1+ (1,0) [0|1000] "A"  EVSE
+ SG_ Target_Voltage : 0|16@1+ (1,0) [0|1500] "V"  EVSE
+
+BO_ 771 Charge_Status: 8 EVSE
+ SG_ Module_Temp : 40|8@1+ (1,0) [0|255] "degC"  EV
+ SG_ SoC : 32|8@1+ (1,0) [0|100] "%"  EV
+ SG_ Present_Current : 16|16@1+ (1,0) [0|1000] "A"  EV
+ SG_ Present_Voltage : 0|16@1+ (1,0) [0|1500] "V"  EV
+
+BO_ 1024 Stop_Charge: 8 EVSE
+ SG_ Reason : 0|8@1+ (1,0) [0|0] ""  EV
+
+BO_ 2047 Emergency_Stop: 8 EVSE
+ SG_ Active : 8|8@1+ (1,0) [0|1] ""  EV
+ SG_ Fault_Code : 0|8@1+ (1,0) [0|0] ""  EV
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,4 @@
+python-can>=4.3
+cantools>=40.0
+# optional, only needed for --ws telemetry streaming:
+# websockets>=12.0
