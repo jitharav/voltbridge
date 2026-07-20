@@ -1,59 +1,79 @@
 # VoltBridge HIL Bench — standalone backend
 
-A software hardware-in-the-loop bench for an **800 VDC** power stage. It needs
-**no hardware**. Two modes share one 800 VDC power stage:
+A software hardware-in-the-loop bench for an **800 VDC** power stage. No hardware
+required. Two modes share one 800 VDC power stage, each running its domain's
+**real protocol stack over a virtual transport**:
 
-- **EV mode** — EV DC fast-charge modeled per IS 17017, over a **real CAN stack**
+- **EV mode** — DC fast-charge modeled per IS 17017, over a **real CAN stack**
   (`python-can` + `acan.dbc`).
-- **DC mode** — AI data-center rack on the NVIDIA 800 VDC architecture, speaking the
-  protocols a real rack actually uses: **PMBus** on the power components and
-  **Modbus-RTU** on the battery.
-
-Companion to the VoltBridge dashboard; runs independently.
+- **DC mode** — AI data-center rack (NVIDIA 800 VDC), with a **real PMBus/SMBus
+  stack** on the power components and a **real Modbus stack** (`pymodbus`) on the
+  battery / BESS.
 
 ## Install & run (Windows / macOS / Linux)
 
-Requires Python 3.9+.
+Python 3.9+.
 
 ```bash
 pip install -r requirements.txt
-python bench.py                       # EV mode, clean session
-python bench.py --mode dc             # NVIDIA 800VDC AI-rack mode
-python bench.py --mode dc --duration 30
-python bench.py --fault iso --at 6    # insulation fault (EV)
+python bench.py                       # EV mode (real CAN)
+python bench.py --mode dc             # data-center mode (real PMBus + Modbus)
 python bench.py --mode dc --fault ot --at 10
-python bench.py --mode dc --ws        # stream telemetry to the dashboard
+python bench.py --mode dc --ws        # + stream telemetry to the dashboard
+python test_protocols.py              # run the protocol test suite (20 checks)
 ```
 
 Fault keys: `iso` `ov` `oc` `ot` `comms`.
 
-## Protocols — one bus per domain (as real hardware is wired)
+## Protocols — one real stack per domain
 
-| Subsystem | Protocol | Notes |
+| Subsystem | Protocol | Implementation |
 |---|---|---|
-| EV charging (internal) | **CAN** | real `python-can` stack + `acan.dbc` |
-| DC power components (rectifier, DC-DC) | **PMBus** | real command codes (READ_VOUT/IOUT/POUT...) + LINEAR11 encoding |
-| DC battery / energy storage | **Modbus-RTU** | function code 0x04 input registers + CRC-16 |
+| EV charging (internal) | **CAN** | `python-can` + `acan.dbc` — real library |
+| DC power (rectifier, DC-DC, trays) | **PMBus / SMBus** | `pmbus_stack.py` — command codes, LINEAR11/16, **CRC-8 PEC**, master↔device transactions |
+| DC battery / energy storage | **Modbus-TCP** | `modbus_stack.py` — real `pymodbus` server (BESS) + client (EMS), FC04 reads + FC06 writes |
 
-EV mode runs a **real CAN stack**. The data-center protocols are **protocol-accurate
-modeled transactions** (correct framing and encoding) over a virtual transport —
-the same philosophy as the virtual CAN bus. In production the transport becomes
-physical: CAN over a real adapter, PMBus over I2C, Modbus over RS-485/TCP.
+All three are **real protocol stacks over virtual transports** (virtual CAN bus,
+in-memory SMBus, loopback TCP). To go to hardware, swap the transport: a CAN
+adapter/ACAN board, an I²C/SMBus adapter (e.g. `smbus2`), and RS-485/TCP for
+Modbus — the stack code above is unchanged.
+
+**PMBus PEC:** every PMBus read is checksum-verified (SMBus Packet Error
+Checking, CRC-8). Corrupted frames raise `PMBusError` — see the test suite.
+
+**Modbus (bidirectional):** the EMS client polls battery telemetry (FC04 input
+registers) *and* issues a power-limit setpoint to the BESS (FC06 write).
+
+## Ports
+
+- Modbus-TCP server binds `127.0.0.1:5020` (loopback only — no admin, no LAN exposure).
+- `--ws` telemetry binds `ws://localhost:8765`.
+
+If `pymodbus` is missing or the port can't bind, the bench prints a note and
+falls back to a lightweight in-process Modbus emitter (PMBus stays real). You can
+force the fallback with `--sim-protocols`.
+
+## Dashboard streaming (purist mode)
+
+With `--ws`, the telemetry payload includes a `frames` array carrying the bench's
+**actual protocol transactions** (CAN / PMBus / Modbus records — real bytes). When
+the dashboard connects, it shows "LIVE" and renders *these real frames* in its log
+instead of its own local simulation, becoming a true viewer of the bench's
+protocol traffic. Disconnected, it falls back to a representative local sim.
 
 ## Files
 
-- `bench.py` — the engine: physics, state machines, protection, protocol I/O.
+- `bench.py` — engine: physics, state machines, protection, protocol I/O.
 - `acan.dbc` — EV / IS 17017 CAN message database.
-- `dc_protocols.py` — PMBus (power) + Modbus (battery) emitters for the rack.
+- `pmbus_stack.py` — real PMBus/SMBus stack (codecs, PEC, master/device).
+- `modbus_stack.py` — real Modbus stack (battery server + EMS client) via pymodbus.
+- `dc_stack.py` — wires PMBus + Modbus into the bench, with logging + fallback.
+- `dc_protocols.py` — lightweight Modbus emitter used only as fallback.
+- `test_protocols.py` — 20-check test suite.
+- `DEMO_SCENARIOS.md` — scripted demo-day use cases.
 - `requirements.txt` — dependencies.
-
-## Optional: stream to the dashboard
-
-`python bench.py --mode dc --ws` (after `pip install websockets`) streams telemetry
-JSON on `ws://localhost:8765` for the dashboard to display live.
 
 ## Credit
 
-CAN conventions are modeled on Ather Energy's open-source ACAN project (MIT):
-https://github.com/AtherEnergy/ACAN. This bench reuses interface conventions, not
-Ather's firmware or hardware.
+CAN conventions modeled on Ather Energy's open-source ACAN (MIT):
+https://github.com/AtherEnergy/ACAN — interface conventions only, not their firmware.

@@ -28,7 +28,7 @@ import time
 import can
 import cantools
 
-from dc_protocols import PMBus, Modbus
+from dc_stack import DCStack
 
 # --- Swap for real hardware later (one line): --------------------------------
 # BUSTYPE, CHANNEL = "socketcan", "can0"     # ACAN board on Linux (SocketCAN)
@@ -58,15 +58,19 @@ def _clamp(v, lo, hi):
 
 
 class Bench:
-    def __init__(self, mode="ev", fault=None, fault_at=None, ws=False):
+    def __init__(self, mode="ev", fault=None, fault_at=None, ws=False, sim_proto=False):
         self.mode = mode
         self.is_dc = mode == "dc"
+        self._sim_proto = sim_proto
+        self.frame_buf = []   # protocol frame records streamed to the dashboard
         if self.is_dc:
-            # data center: PMBus on power components, Modbus on the battery
+            # data center: real PMBus (power) + real Modbus (battery)
             self.db = None
             self.bus_a = self.bus_b = None
-            self.pmbus = PMBus()
-            self.modbus = Modbus(slave=0x01)
+            self.dc = DCStack(n_trays=N_TRAYS, log=True,
+                              want_modbus_tcp=not sim_proto,
+                              frame_sink=self._emit_frame)
+            self._ems_limit_sent = False
         else:
             # EV: real python-can stack + DBC
             self.db = cantools.database.load_file("acan.dbc")
@@ -122,6 +126,12 @@ class Bench:
             while bus.recv(timeout=0) is not None:
                 pass
 
+    def _emit_frame(self, rec):
+        rec.setdefault("t", round(self.t, 1))
+        self.frame_buf.append(rec)
+        if len(self.frame_buf) > 80:
+            self.frame_buf = self.frame_buf[-80:]
+
     def _log(self, node, msg, frame):
         try:
             decoded = self.db.decode_message(msg.frame_id, frame.data)
@@ -134,6 +144,8 @@ class Bench:
         raw = frame.data.hex(" ").upper()
         print(f"{DIM}{self.t:5.1f}{R} {col}{arrow}{R} {CID}0x{msg.frame_id:03X}{R} "
               f"{col}{msg.name:<18}{R} {DIM}[{raw}]{R} {sig}")
+        self._emit_frame({"proto": "CAN", "id": f"0x{msg.frame_id:03X}",
+                          "name": msg.name, "data": raw, "dir": "tx" if up else "rx"})
 
     # ---- protection ----------------------------------------------------------
     def trip(self, code, name):
@@ -143,8 +155,7 @@ class Bench:
         self.fault_code = code
         self.contactor = False
         if self.is_dc:
-            self.pmbus.status(self.t, 0x42, 0x0800, f"{code} {name}")
-            self.modbus.alarm(self.t, f"{code} {name}")
+            self.dc.fault(self.t, code, name, self.injected or "")
         else:
             self.send("EVSE", "Emergency_Stop",
                       {"Fault_Code": _code_num(code), "Active": 1})
@@ -267,7 +278,7 @@ class Bench:
 
     # ---- DC path (NVIDIA 800VDC rack) ---------------------------------------
     def _on_precharge_dc(self):
-        self.pmbus.read(self.t, 0x42, 0x8B, self.v_bus, "V")  # READ_VOUT during precharge
+        self.dc.precharge(self.t, self.v_bus)
 
     def _in_transient(self):
         if self.phase != "TRANSFER" or self.phase_t < 1.5:
@@ -330,30 +341,20 @@ class Bench:
         else:
             self.e2e_eff = self.eff = self.loss_kw = 0.0
 
-        # Protocol telemetry: PMBus on power components, Modbus on the battery
+        # Protocol telemetry: real PMBus (power) + real Modbus (battery)
         if self.phase == "TRANSFER":
+            if not self._ems_limit_sent and self.phase_t > 0.4:
+                self.dc.ems_set_limit(self.t, 900)   # EMS FC06 setpoint at power-up
+                self._ems_limit_sent = True
             self.msg_acc += DT
             if self.msg_acc >= 0.5:
                 self.msg_acc = 0.0
-                # --- PMBus: rectifier / rack power stage (@0x42) ---
-                self.pmbus.read(self.t, 0x42, 0x8B, self.v_bus, "V")             # READ_VOUT
-                self.pmbus.read(self.t, 0x42, 0x8C, self.i_bus, "A")             # READ_IOUT
-                self.pmbus.read(self.t, 0x42, 0x96, self.rack_power * 1000, "W") # READ_POUT
-                self.pmbus.read(self.t, 0x42, 0x8D, self.rect_temp, "degC")      # READ_TEMPERATURE_1
-                # --- PMBus: one GPU-tray DC-DC per cycle (@0x50+n) ---
                 self._tray_idx = (self._tray_idx + 1) % N_TRAYS
                 k = self._tray_idx
-                self.pmbus.read(self.t, 0x50 + k, 0x96,
-                                (self.trays[k] / 100) * P_TRAY_NOM * 1000, "W")
-                # --- Modbus: battery / energy-storage system (slave 0x01) ---
-                self.modbus.read_input_regs(self.t, 0, [
-                    round(self.storage_soc, 1),                       # SoC %
-                    round(self.v_bus, 1),                            # pack/bus V
-                    round(self.storage_power * 1000 / max(1, self.v_bus), 1),  # A
-                    round(self.temp, 1),                             # cell temp
-                    round(self.storage_power, 1),                    # kW (+dis/-chg)
-                    1 if self.buffering else 0,                      # alarm/status
-                ])
+                self.dc.telemetry(
+                    self.t, self.v_bus, self.i_bus, self.rack_power * 1000,
+                    self.rect_temp, self.storage_soc, self.storage_power,
+                    1 if self.buffering else 0, (self.trays[k] / 100) * P_TRAY_NOM)
 
     # ---- shared entry points -------------------------------------------------
     def _on_precharge(self):
@@ -361,7 +362,7 @@ class Bench:
 
     def start_frames(self):
         if self.is_dc:
-            self.pmbus.read(self.t, 0x42, 0x88, 0.0, "V")  # READ_VIN at soft-start
+            self.dc.startup(self.t)
         else:
             self.send("EVSE", "EVSE_Handshake",
                       {"ProtocolVersion": 2, "EVSE_MaxVoltage": 1000, "EVSE_MaxCurrent": int(self.oc_limit)})
@@ -387,10 +388,15 @@ class Bench:
                      buffering=self.buffering, rect_temp=round(self.rect_temp, 1))
         else:
             t.update(soc=round(self.soc, 1))
+        if self.frame_buf:
+            t["frames"] = self.frame_buf
+            self.frame_buf = []
         return t
 
     def close(self):
-        if not self.is_dc:
+        if self.is_dc:
+            self.dc.close()
+        else:
             self.bus_a.shutdown()
             self.bus_b.shutdown()
 
@@ -404,7 +410,8 @@ def _code_num(code):
 
 
 def run(args):
-    b = Bench(mode=args.mode, fault=args.fault, fault_at=args.at, ws=args.ws)
+    b = Bench(mode=args.mode, fault=args.fault, fault_at=args.at, ws=args.ws,
+              sim_proto=args.sim_protocols)
     if b.is_dc:
         title = "AI DATA-CENTER RACK - NVIDIA 800VDC ARCHITECTURE"
         info = f"chain: grid AC -> rectifier -> 800VDC bus -> DC-DC -> {N_TRAYS} GPU trays (~{N_TRAYS*P_TRAY_NOM:.0f} kW)"
@@ -413,7 +420,8 @@ def run(args):
         info = "external link modeled: CCS2 / ISO 15118 (PLC)"
     print(f"\n{OK}VoltBridge HIL bench{R}  -  {title}")
     if b.is_dc:
-        print(f"{DIM}protocols: PMBus (power components) + Modbus-RTU (battery/BESS){R}")
+        mb = "real Modbus-TCP (pymodbus)" if b.dc.modbus_real else "Modbus emitter (fallback)"
+        print(f"{DIM}protocols: real PMBus/SMBus (power, PEC-checked) + {mb} (battery){R}")
     else:
         print(f"{DIM}bus: {BUSTYPE}/{CHANNEL}  -  real CAN stack (python-can)  -  DBC: acan.dbc{R}")
     print(f"{DIM}{info}{R}")
@@ -495,6 +503,8 @@ def main():
     p.add_argument("--at", type=float, default=None)
     p.add_argument("--duration", type=float, default=20.0)
     p.add_argument("--ws", action="store_true")
+    p.add_argument("--sim-protocols", action="store_true",
+                   help="use lightweight in-process Modbus emitter instead of real pymodbus TCP")
     args = p.parse_args()
     if args.fault and args.at is None:
         args.at = 6.0
