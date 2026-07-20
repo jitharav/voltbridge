@@ -136,6 +136,30 @@ const hx = (n) =>
     .toUpperCase()
     .padStart(2, "0");
 
+// PMBus LINEAR11 encode -> "hi lo" hex (matches the Python bench)
+function lin11(value) {
+  let best = null;
+  for (let nn = -16; nn < 16; nn++) {
+    let y = Math.round(value / Math.pow(2, nn));
+    if (y >= -1024 && y <= 1023) {
+      const err = Math.abs(y * Math.pow(2, nn) - value);
+      if (best === null || err < best.err) best = { err, y, n: nn };
+    }
+  }
+  const raw = (((best.n & 0x1f) << 11) | (best.y & 0x7ff)) & 0xffff;
+  return hx((raw >> 8) & 0xff) + " " + hx(raw & 0xff);
+}
+
+// CRC-16/Modbus over a byte array -> "lo hi" hex (real Modbus byte order)
+function modbusCrc(bytes) {
+  let crc = 0xffff;
+  for (const b of bytes) {
+    crc ^= b;
+    for (let i = 0; i < 8; i++) crc = crc & 1 ? (crc >> 1) ^ 0xa001 : crc >> 1;
+  }
+  return hx(crc & 0xff) + " " + hx((crc >> 8) & 0xff);
+}
+
 export default function VoltBridge() {
   const sim = useRef(fresh("ev"));
   const [, setTick] = useState(0);
@@ -149,18 +173,48 @@ export default function VoltBridge() {
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }, []);
 
-  const pushCan = (s, key, bytes, dir) => {
-    const map = CAN_NAMES[s.mode][key];
-    if (!map) return;
-    s.can.unshift({
-      k: s.canId++,
-      t: s.t,
-      id: map[0],
-      name: map[1],
-      data: bytes.map(hx).join(" "),
-      dir, // "tx" from EVSE/PSU, "rx" to it
-    });
+  const pushRow = (s, row) => {
+    s.can.unshift({ k: s.canId++, t: s.t, ...row });
     if (s.can.length > 60) s.can.length = 60;
+  };
+
+  const pushCan = (s, key, bytes, dir) => {
+    if (s.mode === "dc") return pushDc(s, key, dir);
+    const map = CAN_NAMES.ev[key];
+    if (!map) return;
+    pushRow(s, { proto: "CAN", id: map[0], name: map[1], data: bytes.map(hx).join(" "), dir });
+  };
+
+  // Translate lifecycle events into PMBus (power) + Modbus (battery) rows for DC mode
+  const pushDc = (s, key, dir) => {
+    const V = Math.round(s.vBus), I = Math.round(s.iBus), P = Math.round(s.vBus * s.iBus);
+    const A = "@0x42"; // rectifier / rack power stage
+    switch (key) {
+      case "hsA":
+        pushRow(s, { proto: "PMBus", id: A, name: "READ_VIN", data: lin11(0), dir: "tx" }); break;
+      case "pre":
+        pushRow(s, { proto: "PMBus", id: A, name: "OPERATION on", data: "80", dir: "tx" }); break;
+      case "param":
+        pushRow(s, { proto: "PMBus", id: A, name: "VOUT_COMMAND", data: lin11(800), dir: "tx" }); break;
+      case "stop":
+        pushRow(s, { proto: "PMBus", id: A, name: "OPERATION off", data: "00", dir: "tx" }); break;
+      case "estop":
+        pushRow(s, { proto: "PMBus", id: A, name: "STATUS_WORD", data: "08 00", dir: "tx" });
+        pushRow(s, { proto: "MODBUS", id: "0x01", name: "Alarm_Flags set", data: "--", dir: "tx" });
+        break;
+      case "stat": {
+        // full telemetry burst — PMBus reads on power, Modbus read on battery
+        pushRow(s, { proto: "PMBus", id: A, name: "READ_VOUT", data: lin11(V), dir: "tx" });
+        pushRow(s, { proto: "PMBus", id: A, name: "READ_IOUT", data: lin11(I), dir: "tx" });
+        pushRow(s, { proto: "PMBus", id: A, name: "READ_POUT", data: lin11(P), dir: "tx" });
+        pushRow(s, { proto: "PMBus", id: A, name: "READ_TEMP_1", data: lin11(Math.round(s.temp)), dir: "tx" });
+        const soc = Math.round(s.load ? s.load : 80);
+        const frame = [0x01, 0x04, 0x0c, (soc >> 8) & 0xff, soc & 0xff];
+        pushRow(s, { proto: "MODBUS", id: "0x01", name: "FC04 30001+6", data: "CRC " + modbusCrc(frame), dir: "tx" });
+        break;
+      }
+      default: break; // hsB, isoCmd, isoSt, req -> no DC equivalent
+    }
   };
 
   const trip = (s, code, name) => {
@@ -416,7 +470,7 @@ export default function VoltBridge() {
           <div style={{ ...styles.stdTag, borderColor: benchUp ? C.ok : C.line, color: benchUp ? C.ok : C.faint }}>
             {benchUp ? "● LIVE · python bench" : "○ bench offline"}
           </div>
-          <div style={styles.stdTag}>IS 17017 · CCS2 / ISO 15118 · ACAN</div>
+          <div style={styles.stdTag}>{isDC ? "NVIDIA 800VDC · PMBus + Modbus" : "IS 17017 · CCS2 / ISO 15118 · ACAN"}</div>
           <ModeToggle mode={s.mode} onChange={setMode} disabled={s.phase !== PHASE.IDLE} />
           <StatePill phase={s.phase} accent={accent} />
         </div>
@@ -515,13 +569,15 @@ export default function VoltBridge() {
         <section style={styles.col}>
           <div style={{ ...styles.panel, flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
             <PanelHead>
-              INTERNAL ACAN CONTROL BUS
+              {isDC ? "RACK BUS · PMBus + Modbus" : "INTERNAL ACAN CONTROL BUS"}
               <span style={{ marginLeft: "auto", fontSize: 10, color: s.injected === "comms" ? C.fault : C.ok, fontFamily: "IBM Plex Mono, monospace" }}>
                 {s.injected === "comms" ? "● LINK LOST" : "● LINK UP"}
               </span>
             </PanelHead>
             <div style={styles.busCaption}>
-              External charging link: CCS2 / ISO 15118 (PLC) · shown below: on-board control &amp; protection
+              {isDC
+                ? "PMBus on the power components (rectifier, DC-DC) · Modbus-RTU on the battery / BESS"
+                : "External charging link: CCS2 / ISO 15118 (PLC) · shown below: on-board control & protection"}
             </div>
             <CanLog rows={s.can} />
           </div>
@@ -897,9 +953,10 @@ function CanLog({ rows }) {
       <div style={styles.canHeadRow}>
         <span style={{ width: 42 }}>t/s</span>
         <span style={{ width: 26 }}>dir</span>
-        <span style={{ width: 52 }}>id</span>
+        <span style={{ width: 62 }}>proto</span>
+        <span style={{ width: 44 }}>addr</span>
         <span style={{ flex: 1 }}>message</span>
-        <span style={{ width: 96, textAlign: "right" }}>data</span>
+        <span style={{ width: 88, textAlign: "right" }}>data</span>
       </div>
       {rows.length === 0 && (
         <div style={{ color: C.faint, fontFamily: "IBM Plex Mono, monospace", fontSize: 12, padding: "14px 4px" }}>
@@ -907,14 +964,16 @@ function CanLog({ rows }) {
         </div>
       )}
       {rows.map((r) => {
-        const isEstop = r.name === "Emergency_Stop";
+        const isEstop = r.name === "Emergency_Stop" || r.name === "STATUS_WORD" || r.name === "Alarm_Flags set";
+        const protoCol = r.proto === "PMBus" ? C.volt : r.proto === "MODBUS" ? C.evAccent : C.amp;
         return (
           <div key={r.k} style={{ ...styles.canRow, color: isEstop ? C.fault : C.text }}>
             <span style={{ width: 42, color: C.faint }}>{r.t.toFixed(1)}</span>
             <span style={{ width: 26, color: r.dir === "tx" ? C.amp : C.volt }}>{r.dir === "tx" ? "▸" : "◂"}</span>
-            <span style={{ width: 52, color: C.muted }}>{r.id}</span>
+            <span style={{ width: 62, color: protoCol }}>{r.proto ? r.proto : r.id}</span>
+            <span style={{ width: 44, color: C.faint }}>{r.proto ? r.id : ""}</span>
             <span style={{ flex: 1, color: isEstop ? C.fault : C.text }}>{r.name}</span>
-            <span style={{ width: 96, textAlign: "right", color: C.faint }}>{r.data}</span>
+            <span style={{ width: 88, textAlign: "right", color: C.faint }}>{r.data}</span>
           </div>
         );
       })}
