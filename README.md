@@ -1,10 +1,10 @@
 # VoltBridge — 800VDC HIL Bench
 
-<!-- Replace OWNER/REPO with your GitHub username and repository name -->
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
-[![Deploy](https://github.com/OWNER/REPO/actions/workflows/deploy.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/deploy.yml)
+<!-- Replace jitharav/voltbridge with your GitHub username and repository name -->
+[![CI](https://github.com/jitharav/voltbridge/actions/workflows/ci.yml/badge.svg)](https://github.com/jitharav/voltbridge/actions/workflows/ci.yml)
+[![Deploy](https://github.com/jitharav/voltbridge/actions/workflows/deploy.yml/badge.svg)](https://github.com/jitharav/voltbridge/actions/workflows/deploy.yml)
 
-**Live dashboard:** https://OWNER.github.io/REPO/  (standalone simulation)
+**Live dashboard:** https://jitharav.github.io/voltbridge/  (standalone simulation)
 
 One simulated 800V DC power stage, two domains: **EV fast-charging** and **AI data-center racks**.
 Live physics + an IS 17017 / ACAN charging state machine + reactive protection trips.
