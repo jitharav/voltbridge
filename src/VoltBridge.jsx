@@ -292,6 +292,7 @@ export default function VoltBridge() {
 
   const step = useCallback(() => {
     const s = sim.current;
+    if (liveRef.current) return; // connected: the bench telemetry drives all state
     s.t += DT;
     s.phaseT += DT;
     if (flash.current > 0) flash.current = Math.max(0, flash.current - DT);
@@ -497,8 +498,29 @@ export default function VoltBridge() {
     // shared handler for a telemetry message from either transport
     const handleMsg = (msg) => {
       setLive(msg);
+      const s = sim.current;
+      // drive the whole dashboard (gauges, trace, state strip, contactor) from the bench
+      if (typeof msg.v_bus === "number") s.vBus = msg.v_bus;
+      if (typeof msg.i_bus === "number") s.iBus = msg.i_bus;
+      if (typeof msg.temp === "number") s.temp = msg.temp;
+      if (typeof msg.contactor === "boolean") s.contactor = msg.contactor;
+      if (msg.phase) s.phase = msg.phase;
+      if (msg.mode) s.mode = msg.mode;
+      if (msg.fault) { s.faultCode = msg.fault; s.faultName = msg.fault; }
+      // load / charge bar
+      if (msg.mode === "dc") {
+        const rk = (chipRef.current && chipRef.current.rackKW) || 1000;
+        if (typeof msg.power_kw === "number") s.load = clamp((msg.power_kw / rk) * 100, 0, 100);
+      } else if (typeof msg.soc === "number") {
+        s.soc = msg.soc;
+      }
+      // trace history
+      const tt = typeof msg.t === "number" ? msg.t : s.t;
+      s.t = tt;
+      s.hist.push({ t: +tt.toFixed(1), v: +s.vBus.toFixed(1), i: +s.iBus.toFixed(1) });
+      if (s.hist.length > 90) s.hist.shift();
+      // protocol frames
       if (msg.frames && msg.frames.length) {
-        const s = sim.current;
         for (const f of msg.frames) {
           s.can.unshift({ k: s.canId++, t: f.t, proto: f.proto,
                           id: f.id, name: f.name, data: f.data, dir: f.dir });
