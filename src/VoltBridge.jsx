@@ -494,25 +494,57 @@ export default function VoltBridge() {
   const [live, setLive] = useState(null);
   const [benchUp, setBenchUp] = useState(false);
   useEffect(() => {
+    // shared handler for a telemetry message from either transport
+    const handleMsg = (msg) => {
+      setLive(msg);
+      if (msg.frames && msg.frames.length) {
+        const s = sim.current;
+        for (const f of msg.frames) {
+          s.can.unshift({ k: s.canId++, t: f.t, proto: f.proto,
+                          id: f.id, name: f.name, data: f.data, dir: f.dir });
+        }
+        if (s.can.length > 60) s.can.length = 60;
+      }
+    };
+
+    const params = new URLSearchParams(window.location.search);
+
+    // ---- MQTT transport (opt-in via ?mqtt): industrial pub/sub over WebSocket ----
+    if (params.has("mqtt")) {
+      let client, script;
+      const broker = params.get("broker") || "localhost:9001";
+      const url = /^wss?:\/\//.test(broker) ? broker : `ws://${broker}`;
+      const startMqtt = () => {
+        try {
+          client = window.mqtt.connect(url);
+          client.on("connect", () => {
+            liveRef.current = true; setBenchUp(true);
+            client.subscribe("voltbridge/telemetry");
+          });
+          client.on("message", (_t, payload) => {
+            try { handleMsg(JSON.parse(payload.toString())); } catch {}
+          });
+          client.on("close", () => { liveRef.current = false; setBenchUp(false); });
+          client.on("error", () => {});
+        } catch {}
+      };
+      if (window.mqtt) startMqtt();
+      else {
+        script = document.createElement("script");
+        script.src = "https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js";
+        script.onload = startMqtt;
+        document.head.appendChild(script);
+      }
+      return () => { try { client && client.end(true); } catch {} };
+    }
+
+    // ---- WebSocket transport (default) ----
     let ws, retry;
     const connect = () => {
       try {
         ws = new WebSocket("ws://localhost:8765");
         ws.onopen = () => { liveRef.current = true; setBenchUp(true); };
-        ws.onmessage = (e) => {
-          try {
-            const msg = JSON.parse(e.data);
-            setLive(msg);
-            if (msg.frames && msg.frames.length) {
-              const s = sim.current;
-              for (const f of msg.frames) {
-                s.can.unshift({ k: s.canId++, t: f.t, proto: f.proto,
-                                id: f.id, name: f.name, data: f.data, dir: f.dir });
-              }
-              if (s.can.length > 60) s.can.length = 60;
-            }
-          } catch {}
-        };
+        ws.onmessage = (e) => { try { handleMsg(JSON.parse(e.data)); } catch {} };
         ws.onclose = () => { liveRef.current = false; setBenchUp(false); retry = setTimeout(connect, 2000); };
         ws.onerror = () => { try { ws.close(); } catch {} };
       } catch { retry = setTimeout(connect, 2000); }

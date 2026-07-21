@@ -429,13 +429,21 @@ def run(args):
         print(f"{FAULT}scheduled fault: {b.injected} at t={b.fault_at}s{R}")
     print(f"{DIM}{'-'*82}{R}")
 
-    push = _start_ws(b) if args.ws else None
+    sinks = []
+    if args.ws:
+        p = _start_ws(b)
+        if p:
+            sinks.append(p)
+    if args.mqtt:
+        p = _start_mqtt(b, args.broker)
+        if p:
+            sinks.append(p)
     b.start_frames()
     try:
         while b.phase != "DONE" and b.t < args.duration:
             tel = b.step()
-            if push:
-                push(tel)
+            for s in sinks:
+                s(tel)
             time.sleep(DT)
     except KeyboardInterrupt:
         pass
@@ -496,6 +504,46 @@ def _start_ws(bench):
     return push
 
 
+def _start_mqtt(bench, broker):
+    """Publish telemetry to an MQTT broker.
+
+    Topics:
+      voltbridge/telemetry        - full telemetry JSON (dashboard subscribes here)
+      voltbridge/frames/<proto>   - one message per protocol frame (can/pmbus/modbus)
+    The per-protocol topics show the event-driven pub/sub split: each stack is a
+    publisher; dashboards, loggers and analytics are independent subscribers.
+    """
+    try:
+        import paho.mqtt.client as mqtt
+    except ImportError:
+        print(f"{FAULT}--mqtt needs 'paho-mqtt' (pip install paho-mqtt); continuing without it{R}")
+        return None
+
+    host, _, port = broker.partition(":")
+    port = int(port or 1883)
+    try:  # paho 2.x requires an explicit callback API version; 1.x doesn't accept it
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+    except (AttributeError, TypeError):
+        client = mqtt.Client()
+    try:
+        client.connect(host, port, keepalive=30)
+    except Exception as e:
+        print(f"{FAULT}MQTT connect to {broker} failed ({e}); continuing without it{R}")
+        return None
+    client.loop_start()
+    print(f"{OK}MQTT telemetry on {broker}{R}  {DIM}topics: voltbridge/telemetry, voltbridge/frames/#{R}")
+
+    def push(tel):
+        try:
+            client.publish("voltbridge/telemetry", json.dumps(tel), qos=0)
+            for fr in tel.get("frames", []):
+                proto = str(fr.get("proto", "?")).lower()
+                client.publish(f"voltbridge/frames/{proto}", json.dumps(fr), qos=0)
+        except Exception:
+            pass
+    return push
+
+
 def main():
     p = argparse.ArgumentParser(description="VoltBridge HIL bench (standalone, no hardware)")
     p.add_argument("--mode", choices=["ev", "dc"], default="ev")
@@ -503,6 +551,10 @@ def main():
     p.add_argument("--at", type=float, default=None)
     p.add_argument("--duration", type=float, default=20.0)
     p.add_argument("--ws", action="store_true")
+    p.add_argument("--mqtt", action="store_true",
+                   help="publish telemetry to an MQTT broker (industrial pub/sub)")
+    p.add_argument("--broker", default="localhost:1883",
+                   help="MQTT broker host:port (default localhost:1883)")
     p.add_argument("--sim-protocols", action="store_true",
                    help="use lightweight in-process Modbus emitter instead of real pymodbus TCP")
     args = p.parse_args()
