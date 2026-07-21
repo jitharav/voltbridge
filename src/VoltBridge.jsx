@@ -597,7 +597,7 @@ export default function VoltBridge() {
           <Gauge
             label="DC BUS VOLTAGE"
             value={s.vBus}
-            max={1000}
+            max={900}
             unit="V"
             color={C.volt}
             warnAt={LIMIT.vBusMax}
