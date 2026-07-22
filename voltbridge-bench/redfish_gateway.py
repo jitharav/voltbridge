@@ -126,6 +126,7 @@ def res_chassis(t):
         "Thermal": {"@odata.id": "/redfish/v1/Chassis/Rack1/Thermal"},
         "Oem": {"VoltBridge": {
             "@odata.id": "/redfish/v1/Chassis/Rack1/Battery",
+            "Accelerator": t.get("chip"),
             "Phase": t.get("phase"),
             "Mode": t.get("mode"),
             "EndToEndEfficiencyPercent": t.get("e2e_eff"),
@@ -261,7 +262,7 @@ a{color:var(--green)}
 </style></head><body>
 <h1>VOLT<b>BRIDGE</b> · 800VDC Rack Management Console</h1>
 <div class=sub><span id=dot class=dot></span><span id=conn>connecting…</span>
- · live via Redfish API · <a href="/redfish/v1/Chassis/Rack1" target=_blank>view raw JSON</a></div>
+ · <span id=accel>—</span> · live via Redfish API · <a href="/redfish/v1/Chassis/Rack1" target=_blank>view raw JSON</a></div>
 <div id=banner class=banner>—</div>
 <div class=grid>
   <div class=card><h2>Power</h2>
@@ -304,6 +305,8 @@ async function tick(){
     j('/redfish/v1/Chassis/Rack1'),j('/redfish/v1/Chassis/Rack1/Power'),
     j('/redfish/v1/Chassis/Rack1/Thermal'),j('/redfish/v1/Chassis/Rack1/Battery')]);
   $('dot').style.background='var(--green)';$('conn').textContent='LIVE — connected to bench';
+  const acc=(ch.Oem&&ch.Oem.VoltBridge&&ch.Oem.VoltBridge.Accelerator)||null;
+  $('accel').textContent=acc||'—';
   // health banner
   const h=(ch.Status&&ch.Status.Health)||'OK';
   const col=h==='Critical'?'var(--crit)':h==='Warning'?'var(--warn)':'var(--green)';

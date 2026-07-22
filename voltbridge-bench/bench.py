@@ -70,6 +70,19 @@ VEHICLES = {
 }
 DEFAULT_VEHICLE = "taycan"
 
+# AI accelerator catalog (DC mode). id -> (name, kW per compute tray; 8 trays per rack)
+# all <= 132 kW/tray so bus current stays within the proven-safe range.
+CHIPS = {
+    "gb200":    ("NVIDIA GB200 NVL72",      132.0),
+    "gb300":    ("NVIDIA GB300 NVL72",      132.0),
+    "mi300":    ("AMD Instinct MI300X",     118.0),
+    "tpu":      ("Google TPU v5p",          108.0),
+    "trainium": ("AWS Trainium2",           112.0),
+    "ascend":   ("Huawei Ascend 910C",      124.0),
+    "mixed":    ("Mixed accelerator rack",  128.0),
+}
+DEFAULT_CHIP = "gb200"
+
 
 def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
@@ -77,7 +90,7 @@ def _clamp(v, lo, hi):
 
 class Bench:
     def __init__(self, mode="ev", fault=None, fault_at=None, ws=False, sim_proto=False,
-                 vehicle=DEFAULT_VEHICLE):
+                 vehicle=DEFAULT_VEHICLE, chip=DEFAULT_CHIP):
         self.mode = mode
         self.is_dc = mode == "dc"
         self._sim_proto = sim_proto
@@ -134,6 +147,11 @@ class Bench:
         self.full_sec = float(full_sec)
         self.i_max = float(i_max)
         self.oc_limit = 1600.0 if self.is_dc else max(340.0, i_max * 1.15)
+        # selected accelerator drives the DC rack (name + per-tray power)
+        cname, p_tray = CHIPS.get(chip, CHIPS[DEFAULT_CHIP])
+        self.chip_id = chip if chip in CHIPS else DEFAULT_CHIP
+        self.chip_name = cname
+        self.p_tray_nom = float(p_tray)
         self.durations = dict(HANDSHAKE=2.0, INSULATION=2.6, PRECHARGE=1.6, SHUTDOWN=2.0)
 
     # ---- CAN -----------------------------------------------------------------
@@ -323,8 +341,8 @@ class Bench:
             self.trays[k] += _clamp(target - self.trays[k], -250 * DT, 250 * DT)
 
         avg_load = sum(self.trays) / N_TRAYS
-        self.rack_power = N_TRAYS * (avg_load / 100.0) * P_TRAY_NOM
-        nominal = N_TRAYS * (min(base, 100) / 100.0) * P_TRAY_NOM
+        self.rack_power = N_TRAYS * (avg_load / 100.0) * self.p_tray_nom
+        nominal = N_TRAYS * (min(base, 100) / 100.0) * self.p_tray_nom
         spike_delta = max(0.0, self.rack_power - nominal)
 
         # energy storage buffers transients so the grid draw stays flat
@@ -352,7 +370,7 @@ class Bench:
             self.i_bus = max(0.0, self.i_bus - 6000 * DT)
 
         # thermal (rectifier + representative module temp)
-        lf = self.grid_power / (N_TRAYS * P_TRAY_NOM)
+        lf = self.grid_power / (N_TRAYS * self.p_tray_nom)
         heat = lf * 40
         cool = (self.temp - 25) * 1.0 - (150 if armed == "ot" else 0)
         self.temp = max(25.0, self.temp + (heat - cool) * DT)
@@ -380,7 +398,7 @@ class Bench:
                 self.dc.telemetry(
                     self.t, self.v_bus, self.i_bus, self.rack_power * 1000,
                     self.rect_temp, self.storage_soc, self.storage_power,
-                    1 if self.buffering else 0, (self.trays[k] / 100) * P_TRAY_NOM)
+                    1 if self.buffering else 0, (self.trays[k] / 100) * self.p_tray_nom)
 
     # ---- shared entry points -------------------------------------------------
     def _on_precharge(self):
@@ -404,14 +422,15 @@ class Bench:
         if self.is_dc:
             t.update(rack_power_kw=round(self.rack_power, 1),
                      grid_power_kw=round(self.grid_power, 1),
-                     trays=[round((l / 100) * P_TRAY_NOM, 1) for l in self.trays],
+                     trays=[round((l / 100) * self.p_tray_nom, 1) for l in self.trays],
                      n_trays=N_TRAYS, e2e_eff=round(self.e2e_eff, 2),
                      baseline_eff=BASELINE_54V_EFF,
                      eff_gain=round(self.e2e_eff - BASELINE_54V_EFF, 2),
                      loss_kw=round(self.loss_kw, 1),
                      storage_soc=round(self.storage_soc, 1),
                      storage_power=round(self.storage_power, 1),
-                     buffering=self.buffering, rect_temp=round(self.rect_temp, 1))
+                     buffering=self.buffering, rect_temp=round(self.rect_temp, 1),
+                     chip=self.chip_name, chip_id=self.chip_id)
         else:
             t.update(soc=round(self.soc, 1), vehicle=self.veh_name, vehicle_id=self.veh_id,
                      pack_v=int(self.pack_v))
@@ -438,10 +457,11 @@ def _code_num(code):
 
 def run(args):
     b = Bench(mode=args.mode, fault=args.fault, fault_at=args.at, ws=args.ws,
-              sim_proto=args.sim_protocols, vehicle=getattr(args, "vehicle", DEFAULT_VEHICLE))
+              sim_proto=args.sim_protocols, vehicle=getattr(args, "vehicle", DEFAULT_VEHICLE),
+              chip=getattr(args, "chip", DEFAULT_CHIP))
     if b.is_dc:
-        title = "AI DATA-CENTER RACK - NVIDIA 800VDC ARCHITECTURE"
-        info = f"chain: grid AC -> rectifier -> 800VDC bus -> DC-DC -> {N_TRAYS} GPU trays (~{N_TRAYS*P_TRAY_NOM:.0f} kW)"
+        title = "AI DATA-CENTER RACK - 800VDC ARCHITECTURE"
+        info = f"accelerator: {b.chip_name}  -  {N_TRAYS} trays  -  ~{N_TRAYS*b.p_tray_nom:.0f} kW rack"
     else:
         title = "EV FAST-CHARGE - IS 17017"
         info = f"vehicle: {b.veh_name}  -  {int(b.pack_v)}V pack  -  peak {int(b.i_max)}A"
@@ -576,6 +596,8 @@ def main():
     p.add_argument("--mode", choices=["ev", "dc"], default="ev")
     p.add_argument("--vehicle", choices=list(VEHICLES.keys()), default=DEFAULT_VEHICLE,
                    help="EV model to charge (EV mode); sets pack voltage, peak current, time")
+    p.add_argument("--chip", choices=list(CHIPS.keys()), default=DEFAULT_CHIP,
+                   help="AI accelerator for the rack (DC mode); sets name and rack power")
     p.add_argument("--fault", choices=["iso", "ov", "oc", "ot", "comms"], default=None)
     p.add_argument("--at", type=float, default=None)
     p.add_argument("--duration", type=float, default=20.0)

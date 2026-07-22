@@ -144,22 +144,27 @@ async def run_ocpp(csms_url):
         try:
             async with websockets.connect(csms_url, subprotocols=["ocpp1.6"]) as ws:
                 print(f"[CP] connected to CSMS {csms_url}")
-                # brief wait so we can report the actual vehicle in BootNotification
-                model = None
-                for _ in range(20):
-                    with _lock:
-                        model = _latest.get("vehicle")
-                    if model:
-                        break
-                    await asyncio.sleep(0.1)
-                await _call(ws, nid(), "BootNotification", boot_notification_payload(model))
+                booted = False
                 last_status = None
+                last_vehicle = None
                 hb = 0
                 while True:
                     with _lock:
                         t = dict(_latest)
                         n = _count
                     if n > 0:
+                        veh = t.get("vehicle")
+                        # (re)announce identity on first boot and whenever the vehicle changes
+                        if not booted:
+                            await _call(ws, nid(), "BootNotification", boot_notification_payload(veh))
+                            booted = True
+                            last_vehicle = veh
+                            last_status = None
+                        elif veh and veh != last_vehicle:
+                            print(f"[CP] vehicle changed -> {veh}; re-sending BootNotification")
+                            await _call(ws, nid(), "BootNotification", boot_notification_payload(veh))
+                            last_vehicle = veh
+                            last_status = None
                         status = ocpp_status(t.get("phase", "IDLE"))
                         if status != last_status:
                             await _call(ws, nid(), "StatusNotification",
