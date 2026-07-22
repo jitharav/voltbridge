@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    name: Protocol tests (py${{ matrix.python }} · ${{ matrix.os }})
+    name: Protocol + gateway tests (py${{ matrix.python }} · ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -28,10 +28,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install paho-mqtt
+
+      - name: Compile all modules (syntax check)
+        working-directory: voltbridge-bench
+        run: python -m compileall -q bench.py pmbus_stack.py modbus_stack.py dc_stack.py dc_protocols.py redfish_gateway.py
 
       - name: Run protocol test suite (CAN + PMBus + Modbus)
         working-directory: voltbridge-bench
         run: python test_protocols.py
+
+      - name: Run Redfish gateway self-test
+        working-directory: voltbridge-bench
+        run: python test_gateway.py
 
   build:
     name: Dashboard build

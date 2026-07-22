@@ -73,3 +73,35 @@ independent proof that the stacks are publishing to a real message bus.
   to load the MQTT-over-WebSocket library from a CDN.
 - Nothing here changes the default behaviour: no `--mqtt` flag and no `?mqtt`
   means the bench and dashboard work exactly as before over WebSocket.
+
+---
+
+# Redfish gateway (second subscriber → data-center management API)
+
+`redfish_gateway.py` is a SECOND subscriber on the same MQTT bus. It subscribes
+to `voltbridge/telemetry` and re-exposes the rack as a Redfish-style HTTP API —
+the DMTF standard AI data centers use for power/thermal/storage management. This
+shows the pub/sub payoff: the dashboard is one subscriber, this is another, both
+fed by one stream, with zero changes to the bench.
+
+## Run (with broker + bench --mqtt already running)
+```
+python redfish_gateway.py           # HTTP on :8080, broker localhost:1883
+```
+
+## Query from any client (browser, curl, DCIM tool)
+```
+curl http://localhost:8080/redfish/v1/Chassis/Rack1/Power
+curl http://localhost:8080/redfish/v1/Chassis/Rack1/Thermal
+curl http://localhost:8080/redfish/v1/Chassis/Rack1/Battery
+```
+Or open http://localhost:8080/ in a browser for a clickable index.
+
+You'll see live rack power (PowerConsumedWatts), 800V bus voltage, module
+temperatures, and energy-storage State-of-Charge — the same telemetry the
+dashboard shows, in the management-plane format an operator's tools would poll.
+
+## Scope (honest)
+This models the READ / monitoring surface of Redfish. A production BMC also adds
+authentication, event subscriptions, PATCH control actions and full DMTF
+conformance. It's a representative gateway, not a certified Redfish service.
