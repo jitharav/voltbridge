@@ -149,3 +149,34 @@ Representative OCPP 1.6-J subset (BootNotification, StatusNotification,
 MeterValues, Heartbeat). A production charge point implements the full
 transaction/authorization/smart-charging message set and OCPP security
 profiles. Representative, not a certified stack.
+
+---
+
+# Anomaly detector (statistical early-warning — third subscriber)
+
+`anomaly_detector.py` is a THIRD subscriber on the telemetry bus. It watches the
+live signals and raises EARLY WARNINGS before the bench's hard protection trips,
+using transparent statistical process monitoring (not ML):
+  * proximity  — reading within 92% of its protection limit
+  * projection — linear trend extrapolated to the limit ("~N s to trip")
+  * z-score    — statistical outlier vs a rolling window
+It re-publishes alerts to `voltbridge/alerts`, so it's both subscriber and
+publisher. Tuned conservatively to avoid false alarms on normal transients.
+
+## Run (with broker + bench --mqtt running)
+```
+python anomaly_detector.py
+# optional: watch the alert topic
+mosquitto_sub -h localhost -t voltbridge/alerts -v
+```
+Inject a fault to see it warn first, e.g. over-temp:
+```
+python bench.py --mode dc --mqtt --fault ot --at 20 --duration 60
+```
+The detector prints a rising-temperature projection ("projected to reach 85degC
+in ~Ns") shortly before the bench's F-OT-04 protection trips.
+
+## Scope (honest)
+Classical statistical process control — rolling mean/std, z-score, linear trend.
+Transparent and explainable; NOT a trained ML model. It's an early-warning layer
+that turns raw telemetry into "act before it trips."

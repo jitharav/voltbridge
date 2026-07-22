@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    name: Protocol + gateway tests (py${{ matrix.python }} · ${{ matrix.os }})
+    name: Protocol + gateway + anomaly tests (py${{ matrix.python }} · ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -32,7 +32,7 @@ jobs:
 
       - name: Compile all modules (syntax check)
         working-directory: voltbridge-bench
-        run: python -m compileall -q bench.py pmbus_stack.py modbus_stack.py dc_stack.py dc_protocols.py redfish_gateway.py ocpp_gateway.py ocpp_csms.py
+        run: python -m compileall -q bench.py pmbus_stack.py modbus_stack.py dc_stack.py dc_protocols.py redfish_gateway.py ocpp_gateway.py ocpp_csms.py anomaly_detector.py
 
       - name: Run protocol test suite (CAN + PMBus + Modbus)
         working-directory: voltbridge-bench
@@ -45,6 +45,10 @@ jobs:
       - name: Run OCPP gateway self-test (EV charging protocol)
         working-directory: voltbridge-bench
         run: python test_ocpp.py
+
+      - name: Run anomaly detector self-test (statistical early-warning)
+        working-directory: voltbridge-bench
+        run: python test_anomaly.py
 
   build:
     name: Dashboard build
