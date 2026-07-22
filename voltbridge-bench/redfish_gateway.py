@@ -287,7 +287,7 @@ a{color:var(--green)}
   <div class=card><h2>Efficiency</h2>
     <div><span id=eff class=big>—</span><span class=unit>% end-to-end</span></div>
     <div class=row><span>54V baseline</span><b><span id=base>—</span> %</b></div>
-    <div class=row><span>Gain</span><b style="color:var(--green)">+<span id=gain>—</span> %</b></div>
+    <div class=row><span>Gain</span><b id=gainwrap style="color:var(--green)">—</b></div>
     <div class=row style="margin-top:8px"><span>Phase</span><b id=phase>—</b></div>
   </div>
 </div>
@@ -336,7 +336,10 @@ async function tick(){
   const co=(ch.Oem&&ch.Oem.VoltBridge)||{};
   $('eff').textContent=co.EndToEndEfficiencyPercent!=null?co.EndToEndEfficiencyPercent:'—';
   $('base').textContent=co.BaselineEfficiencyPercent!=null?co.BaselineEfficiencyPercent:'—';
-  $('gain').textContent=co.EfficiencyGainPercent!=null?co.EfficiencyGainPercent:'—';
+  const g=co.EfficiencyGainPercent;
+  const gw=$('gainwrap');
+  if(co.Phase==='FAULT'||g==null||g<=0){gw.textContent='—';gw.style.color='var(--muted)';}
+  else{gw.textContent='+'+g+' %';gw.style.color='var(--green)';}
   $('phase').textContent=co.Phase||'—';
  }catch(e){
   $('dot').style.background='var(--crit)';
