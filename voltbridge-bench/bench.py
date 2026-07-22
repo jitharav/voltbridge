@@ -52,13 +52,32 @@ TRANSIENT_GAIN = 0.28         # +28% load during a burst
 CID = "\033[38;5;244m"; TX = "\033[38;5;80m"; RX = "\033[38;5;179m"
 FAULT = "\033[38;5;203m"; OK = "\033[38;5;114m"; DIM = "\033[38;5;240m"; R = "\033[0m"
 
+# EV catalog (mirrors the dashboard). id -> (name, pack_V, peak_current_A, demo_full_seconds)
+VEHICLES = {
+    "taycan":  ("Porsche Taycan Turbo S",        800, 338, 33),
+    "etrongt": ("Audi e-tron GT",                800, 338, 33),
+    "folgore": ("Maserati GranTurismo Folgore",  800, 338, 30),
+    "battista":("Pininfarina Battista",          800, 338, 42),
+    "ferrari": ("Ferrari Elettrica (est.)",      800, 437, 36),
+    "ioniq5":  ("Hyundai Ioniq 5",               800, 294, 24),
+    "models":  ("Tesla Model S Plaid",           400, 625, 35),
+    "model3":  ("Tesla Model 3 Long Range",      400, 625, 27),
+    "i7":      ("BMW i7 M70",                     400, 488, 38),
+    "eqs":     ("Mercedes-AMG EQS",              400, 500, 38),
+    "ariya":   ("Nissan Ariya",                  400, 325, 31),
+    "bz4x":    ("Toyota bZ4X",                    400, 375, 26),
+    "lexusrz": ("Lexus RZ 450e",                 400, 375, 26),
+}
+DEFAULT_VEHICLE = "taycan"
+
 
 def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
 class Bench:
-    def __init__(self, mode="ev", fault=None, fault_at=None, ws=False, sim_proto=False):
+    def __init__(self, mode="ev", fault=None, fault_at=None, ws=False, sim_proto=False,
+                 vehicle=DEFAULT_VEHICLE):
         self.mode = mode
         self.is_dc = mode == "dc"
         self._sim_proto = sim_proto
@@ -107,8 +126,14 @@ class Bench:
         self.rect_temp = 25.0
         self._tray_idx = 0
 
-        self.i_max = 300.0
-        self.oc_limit = 1600.0 if self.is_dc else 340.0
+        # selected vehicle drives the EV charge (pack voltage, peak current, time)
+        vname, pack_v, i_max, full_sec = VEHICLES.get(vehicle, VEHICLES[DEFAULT_VEHICLE])
+        self.veh_id = vehicle if vehicle in VEHICLES else DEFAULT_VEHICLE
+        self.veh_name = vname
+        self.pack_v = float(pack_v)
+        self.full_sec = float(full_sec)
+        self.i_max = float(i_max)
+        self.oc_limit = 1600.0 if self.is_dc else max(340.0, i_max * 1.15)
         self.durations = dict(HANDSHAKE=2.0, INSULATION=2.6, PRECHARGE=1.6, SHUTDOWN=2.0)
 
     # ---- CAN -----------------------------------------------------------------
@@ -198,12 +223,13 @@ class Bench:
         elif self.phase == "SHUTDOWN" and self.phase_t >= d["SHUTDOWN"]:
             self.phase = "DONE"
 
-        # bus voltage (shared): ramp on precharge, hold 800 on transfer
+        # bus voltage (shared): ramp on precharge, then hold pack voltage on transfer
+        pv = 800.0 if self.is_dc else self.pack_v
         v_target = 0.0
         if self.phase == "PRECHARGE":
-            v_target = 800 * min(1.0, self.phase_t / d["PRECHARGE"])
+            v_target = pv * min(1.0, self.phase_t / d["PRECHARGE"])
         elif self.phase == "TRANSFER":
-            v_target = 800.0
+            v_target = pv
         if armed == "ov" and self.phase == "TRANSFER":
             v_target = 935.0
         slew = 2600 if self.phase == "FAULT" else 900
@@ -231,7 +257,7 @@ class Bench:
     def _on_precharge_ev(self):
         self.send("EVSE", "Precharge_Cmd", {"Enable": 1})
         self.send("EVSE", "Charge_Parameters",
-                  {"Limit_Voltage": 800, "Limit_Current": int(self.oc_limit)})
+                  {"Limit_Voltage": int(self.pack_v), "Limit_Current": int(self.i_max)})
 
     def _step_ev(self, armed):
         i_target = 0.0
@@ -240,9 +266,9 @@ class Bench:
             if self.soc >= 80:
                 i = self.i_max * max(0.08, 1 - (self.soc - 80) / 20 * 0.9)
             i_target = i * min(1.0, self.phase_t / 1.0)
-            self.soc = min(100.0, self.soc + i_target * DT / 90)
+            self.soc = min(100.0, self.soc + (i_target / self.i_max) * (100.0 / self.full_sec) * DT)
         if armed == "oc" and self.phase == "TRANSFER":
-            i_target = 470
+            i_target = self.oc_limit + 120
         islew = 4200 if (self.phase == "FAULT" or not self.contactor) else 1400
         self.i_bus += _clamp(i_target - self.i_bus, -islew * DT, islew * DT)
         if not self.contactor:
@@ -367,7 +393,7 @@ class Bench:
             self.send("EVSE", "EVSE_Handshake",
                       {"ProtocolVersion": 2, "EVSE_MaxVoltage": 1000, "EVSE_MaxCurrent": int(self.oc_limit)})
             self.send("EV", "EV_Handshake",
-                      {"ProtocolVersion": 2, "Pack_Voltage": 800, "Target_SoC": 100})
+                      {"ProtocolVersion": 2, "Pack_Voltage": int(self.pack_v), "Target_SoC": 100})
 
     def telemetry(self):
         t = dict(t=round(self.t, 1), mode=self.mode, phase=self.phase,
@@ -387,7 +413,8 @@ class Bench:
                      storage_power=round(self.storage_power, 1),
                      buffering=self.buffering, rect_temp=round(self.rect_temp, 1))
         else:
-            t.update(soc=round(self.soc, 1))
+            t.update(soc=round(self.soc, 1), vehicle=self.veh_name, vehicle_id=self.veh_id,
+                     pack_v=int(self.pack_v))
         if self.frame_buf:
             t["frames"] = self.frame_buf
             self.frame_buf = []
@@ -411,13 +438,13 @@ def _code_num(code):
 
 def run(args):
     b = Bench(mode=args.mode, fault=args.fault, fault_at=args.at, ws=args.ws,
-              sim_proto=args.sim_protocols)
+              sim_proto=args.sim_protocols, vehicle=getattr(args, "vehicle", DEFAULT_VEHICLE))
     if b.is_dc:
         title = "AI DATA-CENTER RACK - NVIDIA 800VDC ARCHITECTURE"
         info = f"chain: grid AC -> rectifier -> 800VDC bus -> DC-DC -> {N_TRAYS} GPU trays (~{N_TRAYS*P_TRAY_NOM:.0f} kW)"
     else:
         title = "EV FAST-CHARGE - IS 17017"
-        info = "external link modeled: CCS2 / ISO 15118 (PLC)"
+        info = f"vehicle: {b.veh_name}  -  {int(b.pack_v)}V pack  -  peak {int(b.i_max)}A"
     print(f"\n{OK}VoltBridge HIL bench{R}  -  {title}")
     if b.is_dc:
         mb = "real Modbus-TCP (pymodbus)" if b.dc.modbus_real else "Modbus emitter (fallback)"
@@ -547,6 +574,8 @@ def _start_mqtt(bench, broker):
 def main():
     p = argparse.ArgumentParser(description="VoltBridge HIL bench (standalone, no hardware)")
     p.add_argument("--mode", choices=["ev", "dc"], default="ev")
+    p.add_argument("--vehicle", choices=list(VEHICLES.keys()), default=DEFAULT_VEHICLE,
+                   help="EV model to charge (EV mode); sets pack voltage, peak current, time")
     p.add_argument("--fault", choices=["iso", "ov", "oc", "ot", "comms"], default=None)
     p.add_argument("--at", type=float, default=None)
     p.add_argument("--duration", type=float, default=20.0)

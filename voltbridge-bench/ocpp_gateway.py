@@ -57,8 +57,8 @@ def ocpp_status(phase):
     }.get(phase, "Available")
 
 
-def boot_notification_payload():
-    return {"chargePointVendor": "VoltBridge", "chargePointModel": "HIL-Bench-EV"}
+def boot_notification_payload(model=None):
+    return {"chargePointVendor": "VoltBridge", "chargePointModel": model or "HIL-Bench-EV"}
 
 
 def status_notification_payload(status, error_code="NoError"):
@@ -144,7 +144,15 @@ async def run_ocpp(csms_url):
         try:
             async with websockets.connect(csms_url, subprotocols=["ocpp1.6"]) as ws:
                 print(f"[CP] connected to CSMS {csms_url}")
-                await _call(ws, nid(), "BootNotification", boot_notification_payload())
+                # brief wait so we can report the actual vehicle in BootNotification
+                model = None
+                for _ in range(20):
+                    with _lock:
+                        model = _latest.get("vehicle")
+                    if model:
+                        break
+                    await asyncio.sleep(0.1)
+                await _call(ws, nid(), "BootNotification", boot_notification_payload(model))
                 last_status = None
                 hb = 0
                 while True:
