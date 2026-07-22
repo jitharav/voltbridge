@@ -248,7 +248,7 @@ class Bench:
         if not self.contactor:
             self.i_bus = max(0.0, self.i_bus - 3000 * DT)
 
-        heat = (abs(self.v_bus * self.i_bus) / 240_000) * 60
+        heat = (abs(self.v_bus * self.i_bus) / 240_000) * 10
         cool = (self.temp - 25) * 0.28 - (130 if armed == "ot" else 0)
         self.temp = max(25.0, self.temp + (heat - cool) * DT)
         lf = abs(self.v_bus * self.i_bus) / 240_000
