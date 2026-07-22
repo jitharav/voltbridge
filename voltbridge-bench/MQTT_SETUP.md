@@ -105,3 +105,47 @@ dashboard shows, in the management-plane format an operator's tools would poll.
 This models the READ / monitoring surface of Redfish. A production BMC also adds
 authentication, event subscriptions, PATCH control actions and full DMTF
 conformance. It's a representative gateway, not a certified Redfish service.
+
+---
+
+# OCPP gateway (EV side — second subscriber → charging management system)
+
+`ocpp_gateway.py` is the EV-side mirror of the Redfish gateway. It subscribes to
+`voltbridge/telemetry` (bench.py --mqtt, EV mode) and reports the charger to a
+CSMS (Charging Station Management System) over OCPP 1.6-J — the de facto global
+standard for charger-to-backend communication (mandated by EU AFIR and US NEVI).
+
+So: Redfish for the DC rack, OCPP for the EV charger — one bench, both
+management standards, both subscribers on the same MQTT bus.
+
+Architecture:
+```
+bench --MQTT--> broker --MQTT--> ocpp_gateway (charge point) --OCPP/WS--> CSMS
+```
+
+## Run (EV mode)
+Four windows: broker, bench (EV), the CSMS you watch, and the gateway.
+```
+# 1. broker (already covered above)
+# 2. bench in EV mode, publishing to MQTT
+python bench.py --mqtt --duration 600            # --mode ev is the default
+
+# 3. a minimal CSMS to watch (prints incoming OCPP messages)
+pip install websockets
+python ocpp_csms.py                              # ws://localhost:9000
+
+# 4. the charge-point gateway (MQTT -> OCPP)
+python ocpp_gateway.py
+```
+
+Watch the CSMS window: you'll see real OCPP 1.6-J messages arrive —
+BootNotification, StatusNotification (Available/Preparing/Charging/Faulted),
+and MeterValues carrying live Voltage / Current / Power / SoC from the bench.
+Inject a fault on the bench (`--fault oc --at 10`) and StatusNotification flips
+to "Faulted" — the same event seen through the charging management protocol.
+
+## Scope (honest)
+Representative OCPP 1.6-J subset (BootNotification, StatusNotification,
+MeterValues, Heartbeat). A production charge point implements the full
+transaction/authorization/smart-charging message set and OCPP security
+profiles. Representative, not a certified stack.
