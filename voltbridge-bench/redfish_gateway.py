@@ -231,18 +231,120 @@ ROUTES = {
 }
 
 LANDING = """<!doctype html><html><head><meta charset=utf-8>
-<title>VoltBridge Redfish gateway</title>
-<style>body{font-family:monospace;background:#0b0f14;color:#e9eef3;padding:24px}
-a{color:#2dd4a7}h1{color:#f2b138}.m{color:#8fa}</style></head><body>
-<h1>VoltBridge Redfish gateway</h1>
-<p class=m>Second subscriber on the MQTT telemetry bus, re-exposing the rack as a Redfish-style API.</p>
-<ul>
-<li><a href="/redfish/v1/">/redfish/v1/</a> — service root</li>
-<li><a href="/redfish/v1/Chassis/Rack1">/redfish/v1/Chassis/Rack1</a> — chassis + health</li>
-<li><a href="/redfish/v1/Chassis/Rack1/Power">/redfish/v1/Chassis/Rack1/Power</a> — voltage, power, limit</li>
-<li><a href="/redfish/v1/Chassis/Rack1/Thermal">/redfish/v1/Chassis/Rack1/Thermal</a> — temperatures</li>
-<li><a href="/redfish/v1/Chassis/Rack1/Battery">/redfish/v1/Chassis/Rack1/Battery</a> — storage SoC</li>
-</ul></body></html>"""
+<meta name=viewport content="width=device-width, initial-scale=1">
+<title>VoltBridge — Rack Management Console</title>
+<style>
+:root{--bg:#0b0f14;--panel:#121820;--line:#2a3b4d;--text:#e9eef3;--muted:#a3b4c2;
+--gold:#f2b138;--green:#2dd4a7;--amp:#7fd4ff;--volt:#f2b138;--warn:#f0902e;--crit:#ff5470;--power:#b98cff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+font-family:ui-monospace,"Cascadia Code",Consolas,monospace;padding:22px}
+h1{font-family:system-ui,sans-serif;font-size:22px;margin:0 0 2px;letter-spacing:.5px}
+h1 b{color:var(--gold)}
+.sub{color:var(--muted);font-size:12px;margin-bottom:16px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.banner{border-radius:10px;padding:12px 16px;font-size:15px;font-weight:700;margin-bottom:16px;
+border:1px solid var(--line);letter-spacing:1px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.card h2{font-family:system-ui,sans-serif;font-size:11px;letter-spacing:2px;color:var(--muted);
+text-transform:uppercase;margin:0 0 10px}
+.big{font-size:30px;font-weight:700;font-family:system-ui,sans-serif;line-height:1}
+.unit{font-size:13px;color:var(--muted);margin-left:4px}
+.row{display:flex;justify-content:space-between;font-size:13px;margin-top:8px;color:var(--muted)}
+.row b{color:var(--text);font-weight:600}
+.bar{height:8px;background:#0b0f14;border-radius:5px;overflow:hidden;margin-top:6px;border:1px solid var(--line)}
+.bar>i{display:block;height:100%;border-radius:5px;transition:width .3s ease,background .3s ease}
+.pill{display:inline-block;font-size:11px;padding:3px 9px;border-radius:20px;border:1px solid var(--line)}
+a{color:var(--green)}
+.foot{margin-top:16px;font-size:11px;color:var(--muted)}
+</style></head><body>
+<h1>VOLT<b>BRIDGE</b> · 800VDC Rack Management Console</h1>
+<div class=sub><span id=dot class=dot></span><span id=conn>connecting…</span>
+ · live via Redfish API · <a href="/redfish/v1/Chassis/Rack1" target=_blank>view raw JSON</a></div>
+<div id=banner class=banner>—</div>
+<div class=grid>
+  <div class=card><h2>Power</h2>
+    <div><span id=rackkw class=big>—</span><span class=unit>kW rack</span></div>
+    <div class=row><span>Bus voltage</span><b><span id=vbus>—</span> V</b></div>
+    <div class=bar><i id=vbar style="background:var(--volt)"></i></div>
+    <div class=row><span>Bus current</span><b><span id=ibus>—</span> A</b></div>
+    <div class=bar><i id=ibar style="background:var(--amp)"></i></div>
+  </div>
+  <div class=card><h2>Thermal</h2>
+    <div class=row><span>Rectifier</span><b><span id=rt>—</span> °C</b></div>
+    <div class=bar><i id=rtbar></i></div>
+    <div class=row><span>Power module</span><b><span id=mt>—</span> °C</b></div>
+    <div class=bar><i id=mtbar></i></div>
+    <div class=row style="margin-top:10px"><span>Critical limit</span><b>85 °C</b></div>
+  </div>
+  <div class=card><h2>Energy Storage</h2>
+    <div><span id=soc class=big>—</span><span class=unit>% SoC</span></div>
+    <div class=bar><i id=socbar style="background:var(--green)"></i></div>
+    <div class=row><span>Storage power</span><b><span id=sp>—</span> kW</b></div>
+    <div class=row><span id=bufpill class=pill>idle</span></div>
+  </div>
+  <div class=card><h2>Efficiency</h2>
+    <div><span id=eff class=big>—</span><span class=unit>% end-to-end</span></div>
+    <div class=row><span>54V baseline</span><b><span id=base>—</span> %</b></div>
+    <div class=row><span>Gain</span><b style="color:var(--green)">+<span id=gain>—</span> %</b></div>
+    <div class=row style="margin-top:8px"><span>Phase</span><b id=phase>—</b></div>
+  </div>
+</div>
+<div class=foot>Second subscriber on the MQTT telemetry bus · re-exposes the rack over Redfish (DMTF) ·
+representative read/monitoring surface.</div>
+<script>
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function tcolor(f){return f>=0.9?'var(--crit)':f>=0.82?'var(--warn)':'var(--green)'}
+async function j(u){const r=await fetch(u);if(!r.ok)throw new Error(r.status);return r.json()}
+async function tick(){
+ try{
+  const [ch,pw,th,ba]=await Promise.all([
+    j('/redfish/v1/Chassis/Rack1'),j('/redfish/v1/Chassis/Rack1/Power'),
+    j('/redfish/v1/Chassis/Rack1/Thermal'),j('/redfish/v1/Chassis/Rack1/Battery')]);
+  $('dot').style.background='var(--green)';$('conn').textContent='LIVE — connected to bench';
+  // health banner
+  const h=(ch.Status&&ch.Status.Health)||'OK';
+  const col=h==='Critical'?'var(--crit)':h==='Warning'?'var(--warn)':'var(--green)';
+  const b=$('banner');b.style.color=col;b.style.borderColor=col;
+  b.textContent=(h==='OK'?'● HEALTHY':'● '+h.toUpperCase())+
+    ' · '+(ch.PowerState||'')+(ch.Oem&&ch.Oem.VoltBridge&&ch.Oem.VoltBridge.Fault?(' · FAULT '+ch.Oem.VoltBridge.Fault):'');
+  // power
+  const oem=(pw.Oem&&pw.Oem.VoltBridge)||{};
+  const v=pw.Voltages&&pw.Voltages[0]?pw.Voltages[0].ReadingVolts:null;
+  const rackkw=oem.RackPowerkW!=null?oem.RackPowerkW:(pw.PowerControl&&pw.PowerControl[0]?pw.PowerControl[0].PowerConsumedWatts/1000:null);
+  const i=oem.BusCurrentAmps;
+  $('rackkw').textContent=rackkw!=null?rackkw.toFixed(0):'—';
+  $('vbus').textContent=v!=null?v.toFixed(0):'—';$('vbar').style.width=clamp((v||0)/900*100,0,100)+'%';
+  const ilim=(ch.Oem&&ch.Oem.VoltBridge&&ch.Oem.VoltBridge.Mode==='dc')?1320:680;
+  $('ibus').textContent=i!=null?i.toFixed(0):'—';$('ibar').style.width=clamp((i||0)/ilim*100,0,100)+'%';
+  // thermal
+  const temps={};(th.Temperatures||[]).forEach(t=>temps[t.Name]=t.ReadingCelsius);
+  const rt=temps['Rectifier'],mt=temps['Power Module'];
+  $('rt').textContent=rt!=null?rt.toFixed(1):'—';$('mt').textContent=mt!=null?mt.toFixed(1):'—';
+  $('rtbar').style.width=clamp((rt||0)/85*100,0,100)+'%';$('rtbar').style.background=tcolor((rt||0)/85);
+  $('mtbar').style.width=clamp((mt||0)/85*100,0,100)+'%';$('mtbar').style.background=tcolor((mt||0)/85);
+  // storage
+  const soc=ba.StateOfChargePercent,bo=(ba.Oem&&ba.Oem.VoltBridge)||{};
+  $('soc').textContent=soc!=null?soc.toFixed(0):'—';$('socbar').style.width=clamp(soc||0,0,100)+'%';
+  $('sp').textContent=bo.StoragePowerkW!=null?bo.StoragePowerkW.toFixed(0):'—';
+  const bp=$('bufpill');
+  if(bo.Buffering){bp.textContent='● BUFFERING';bp.style.color='var(--gold)';bp.style.borderColor='var(--gold)';}
+  else{bp.textContent='idle';bp.style.color='var(--muted)';bp.style.borderColor='var(--line)';}
+  // efficiency
+  const co=(ch.Oem&&ch.Oem.VoltBridge)||{};
+  $('eff').textContent=co.EndToEndEfficiencyPercent!=null?co.EndToEndEfficiencyPercent:'—';
+  $('base').textContent=co.BaselineEfficiencyPercent!=null?co.BaselineEfficiencyPercent:'—';
+  $('gain').textContent=co.EfficiencyGainPercent!=null?co.EfficiencyGainPercent:'—';
+  $('phase').textContent=co.Phase||'—';
+ }catch(e){
+  $('dot').style.background='var(--crit)';
+  $('conn').textContent='waiting for bench (start bench.py --mode dc --mqtt)';
+ }
+}
+tick();setInterval(tick,1000);
+</script></body></html>"""
 
 
 class Handler(BaseHTTPRequestHandler):
