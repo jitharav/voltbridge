@@ -102,6 +102,27 @@ python anomaly_detector.py          # alerts also on topic  voltbridge/alerts
 
 See `voltbridge-bench/MQTT_SETUP.md` for the full walkthrough and `curl` examples.
 
+### Run the whole stack with Docker (one command)
+
+The broker + bench + gateways + anomaly detector are containerised. The bench
+runs one mode at a time, so services are grouped into profiles. From
+`voltbridge-bench/`:
+
+```bash
+# DC / data-center rack  → Redfish console at http://localhost:8080/
+docker compose --profile dc up --build
+CHIP=tpu docker compose --profile dc up            # pick an accelerator
+
+# EV / fast-charge       → OCPP monitor at http://localhost:9100/
+docker compose --profile ev up --build
+VEHICLE=models docker compose --profile ev up      # pick a car
+```
+
+The broker also exposes WebSocket on `localhost:9001`, so the host dashboard
+(`npm run dev` → `http://localhost:5173/?mqtt`) connects to the containerised
+broker unchanged. Run one profile at a time (a single bench owns the telemetry
+topic).
+
 ### Fault injection (CLI)
 
 ```bash
@@ -158,3 +179,37 @@ voltbridge/
 - The live MQTT/gateway demo runs **locally** (an HTTPS page can't open an insecure `ws://`);
   the deployed GitHub Pages site runs the standalone simulation.
 - Specs and payloads are representative — swap in your real DBC / device map to target specific hardware.
+
+---
+
+## License
+
+This project's own code is released under the **MIT License** — see [`LICENSE`](LICENSE).
+
+## Third-party & acknowledgements
+
+VoltBridge builds on open-source software, all under permissive licenses (no copyleft
+obligations on this project's code):
+
+| Component | Use | License |
+| --- | --- | --- |
+| React, Vite, Recharts | dashboard UI | MIT |
+| MQTT.js | browser MQTT (over WebSocket) | MIT |
+| cantools | CAN/DBC handling | MIT |
+| pymodbus | Modbus-TCP stack | BSD-3-Clause |
+| python-can | CAN transport | LGPL-3.0 (used as an unmodified library) |
+| paho-mqtt | MQTT publisher/subscriber | EPL-2.0 / EDL-1.0 |
+| Eclipse Mosquitto | MQTT broker | EPL-2.0 / EDL-1.0 |
+
+**CAN definitions.** The `acan.dbc` message conventions reference **ACAN**, Ather Energy's
+open-source CAN interface project (MIT). Used at the message-convention level with attribution;
+this is a representative DBC, not an official or complete IS 17017 message set.
+
+**Standards.** OCPP, Redfish, PMBus, Modbus, ISO 15118, IEC 61851 and IS 17017 are referenced by
+name only. This project implements **representative subsets** and does **not** reproduce any
+copyrighted specification text, tables, or full schemas from those standards bodies (OCA, DMTF,
+SMIF, ISO, IEC, BIS).
+
+**Trademarks.** Vehicle and accelerator names (e.g. Tesla, Ferrari, BMW, NVIDIA, AMD) are used
+factually to denote real products (nominative use); no brand logos are reproduced. Product figures
+are approximate published values, with unpublished ones marked *(est.)*.

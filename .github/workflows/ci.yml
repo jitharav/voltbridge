@@ -66,3 +66,12 @@ jobs:
         run: |
           npm ci
           npm run build
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    continue-on-error: true   # informational — won't fail the pipeline
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build bench image
+        run: docker build -t voltbridge-bench ./voltbridge-bench
