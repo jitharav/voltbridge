@@ -28,11 +28,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install paho-mqtt websockets
+          pip install paho-mqtt websockets scikit-learn numpy joblib
 
       - name: Compile all modules (syntax check)
         working-directory: voltbridge-bench
-        run: python -m compileall -q bench.py pmbus_stack.py modbus_stack.py dc_stack.py dc_protocols.py redfish_gateway.py ocpp_gateway.py ocpp_csms.py anomaly_detector.py
+        run: python -m compileall -q bench.py pmbus_stack.py modbus_stack.py dc_stack.py dc_protocols.py redfish_gateway.py ocpp_gateway.py ocpp_csms.py anomaly_detector.py ml_anomaly_detector.py train_ml_anomaly.py synth_telemetry.py
 
       - name: Run protocol test suite (CAN + PMBus + Modbus)
         working-directory: voltbridge-bench
@@ -50,18 +50,20 @@ jobs:
         working-directory: voltbridge-bench
         run: python test_anomaly.py
 
+      - name: Run ML anomaly self-test (unsupervised outlier model)
+        working-directory: voltbridge-bench
+        run: python test_ml_anomaly.py
+
   build:
     name: Dashboard build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-
       - name: Install and build
         run: |
           npm ci
@@ -70,7 +72,7 @@ jobs:
   docker:
     name: Docker image builds
     runs-on: ubuntu-latest
-    continue-on-error: true   # informational — won't fail the pipeline
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Build bench image
