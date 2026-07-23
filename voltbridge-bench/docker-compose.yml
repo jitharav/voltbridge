@@ -6,10 +6,12 @@
 #   DC / data-center rack  (Redfish console at http://localhost:8080/):
 #       docker compose --profile dc up --build
 #       override the chip:   CHIP=tpu docker compose --profile dc up
+#       (broker + bench + Redfish + statistical anomaly + ML anomaly [DC model])
 #
 #   EV / fast-charge       (OCPP monitor at http://localhost:9100/):
 #       docker compose --profile ev up --build
 #       override the car:    VEHICLE=models docker compose --profile ev up
+#       (broker + bench + OCPP CSMS + gateway + statistical anomaly + ML anomaly [EV model])
 #
 # The broker and anomaly detector run in both profiles (no profile = always on).
 # The dashboard (npm run dev on the host) connects to the broker at
@@ -55,6 +57,17 @@ services:
       - "8080:8080"   # Redfish management console
     restart: unless-stopped
 
+  ml-anomaly:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    image: voltbridge-bench-ml
+    container_name: vb-ml-anomaly
+    profiles: ["dc"]
+    depends_on: [broker]
+    command: python ml_anomaly_detector.py --broker broker:1883
+    restart: unless-stopped
+
   # ---- EV profile -----------------------------------------------------------
   bench-ev:
     build: .
@@ -83,4 +96,15 @@ services:
     profiles: ["ev"]
     depends_on: [broker, ocpp-csms]
     command: python ocpp_gateway.py --broker broker:1883 --csms ws://ocpp-csms:9000/CP1
+    restart: unless-stopped
+
+  ml-anomaly-ev:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    image: voltbridge-bench-ml
+    container_name: vb-ml-anomaly-ev
+    profiles: ["ev"]
+    depends_on: [broker]
+    command: python ml_anomaly_detector.py --broker broker:1883
     restart: unless-stopped

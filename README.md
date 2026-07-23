@@ -42,11 +42,12 @@ A 25-check suite (`test_protocols.py`) exercises all three.
                                      ┌─→ Dashboard  (human UI, MQTT-over-WebSocket)
   bench.py ──MQTT──► broker ─────────┼─→ Redfish gateway ──► DC management clients   (Redfish  — data center)
   (CAN/PMBus/Modbus) (Mosquitto)     ├─→ OCPP gateway ─────► CSMS                     (OCPP 1.6 — EV charging)
-                                     └─→ Anomaly detector ─► voltbridge/alerts        (statistical early-warning)
+                                     ├─→ Anomaly detector ─► voltbridge/alerts        (statistical early-warning)
+                                     └─→ ML anomaly detector ► voltbridge/alerts      (unsupervised, DC + EV models)
 ```
 
-The bench publishes telemetry once; the dashboard, both management gateways, and the anomaly
-detector are independent subscribers. Add another (a logger, a database, more dashboards) with
+The bench publishes telemetry once; the dashboard, both management gateways, and the two anomaly
+detectors are independent subscribers. Add another (a logger, a database, more dashboards) with
 zero changes to the bench — that's the point of the pub/sub design.
 
 ---
@@ -54,13 +55,43 @@ zero changes to the bench — that's the point of the pub/sub design.
 ## What's real vs representative (honest scoping)
 
 **Real:** the three protocol stacks and their encodings/checks; the live physics (CC-CV charging,
-thermal, efficiency, protection trips); MQTT pub/sub; the statistical early-warning maths; CI/CD.
+thermal, efficiency, protection trips); MQTT pub/sub; the statistical early-warning maths; the
+unsupervised ML anomaly models (scikit-learn); CI/CD.
 
 **Representative (modelled, not certified):** the Redfish gateway models the read/monitoring
 surface (a production BMC adds auth, events, control, full DMTF conformance); the OCPP gateway is
 a 1.6-J subset (BootNotification, StatusNotification, MeterValues, Heartbeat); the CAN payloads
-are convention-level; the anomaly layer is classical statistics, **not** a trained ML model.
+are convention-level. The ML anomaly models are genuine unsupervised learning, but trained on
+**synthetic** normal telemetry that reproduces the bench physics (not a labelled production
+corpus) — retrainable on real logged telemetry with the same feature vectors, no code changes.
 Vehicle/chip specs are approximate published figures, unpublished ones marked *(est.)*.
+
+---
+
+## Anomaly detection — two complementary layers
+
+VoltBridge runs two independent anomaly subscribers on the same telemetry bus:
+
+- **Statistical early-warning** (`anomaly_detector.py`) — transparent, explainable, per-limit:
+  proximity-to-limit, linear trend projection ("projected to reach limit in ~N s"), and z-score
+  outliers. No training, no black box — every alert is traceable to a threshold.
+- **Unsupervised ML** (`ml_anomaly_detector.py`) — catches **multivariate** outliers: combinations
+  of readings unlike normal operation, even when each reading is individually in range.
+
+The ML layer uses **one model per operating envelope**, because DC and EV have very different
+"normal":
+
+| Domain | Model | Features | Held-out result |
+| --- | --- | --- | --- |
+| DC rack | single EllipticEnvelope (robust covariance / Mahalanobis) | v_bus, i_bus, power_kw, temp, rect_temp, eff | ~1% FPR, 100% detection |
+| EV charge | two sub-models split at SoC 80% (CC / CV) | v_ratio, i_frac, temp, soc, eff (pack-agnostic) | ~1% FPR, 100% detection |
+
+The detector auto-selects the model by telemetry `mode`. Training data is **generated in code**
+(`synth_telemetry.py`) to reproduce the bench physics per domain — nothing is downloaded; models
+train on normal only, and can be retrained on real logged telemetry with the same feature vectors
+and no code changes. The trained models (`ml_anomaly_model_dc.joblib`, `ml_anomaly_model_ev.joblib`)
+are committed, so the detector runs without retraining; run `python train_ml_anomaly.py` to
+regenerate them.
 
 ---
 
@@ -98,15 +129,18 @@ python ocpp_csms.py                 # ws://localhost:9000
 python ocpp_gateway.py
 # 3d. statistical early-warning:
 python anomaly_detector.py          # alerts also on topic  voltbridge/alerts
+# 3e. ML anomaly detector (unsupervised; auto-selects DC or EV model by mode):
+python ml_anomaly_detector.py       # needs scikit-learn; alerts on voltbridge/alerts (source=ml)
 ```
 
 See `voltbridge-bench/MQTT_SETUP.md` for the full walkthrough and `curl` examples.
 
 ### Run the whole stack with Docker (one command)
 
-The broker + bench + gateways + anomaly detector are containerised. The bench
-runs one mode at a time, so services are grouped into profiles. From
-`voltbridge-bench/`:
+The broker + bench + gateways + both anomaly detectors are containerised. The
+bench runs one mode at a time, so services are grouped into profiles. The ML
+detector uses a separate image (`Dockerfile.ml`) so scikit-learn doesn't bloat
+the lean real-time services. From `voltbridge-bench/`:
 
 ```bash
 # DC / data-center rack  → Redfish console at http://localhost:8080/
@@ -133,6 +167,10 @@ python bench.py --mode dc --mqtt --fault ot  --at 20    # over-temp (anomaly det
 python bench.py --mode dc --mqtt --fault comms --at 8   # comms loss
 ```
 
+Both anomaly detectors flag injected faults on `voltbridge/alerts`: the statistical one gives
+explainable, per-limit early warning; the ML one flags multivariate outliers. The ML detector
+runs in DC or EV mode (it auto-selects the matching model) and scores during the transfer phase.
+
 ---
 
 ## Testing & CI
@@ -144,10 +182,11 @@ test_protocols.py   # 25 checks — CAN + PMBus (PEC) + Modbus
 test_gateway.py     # Redfish resource builders
 test_ocpp.py        # OCPP 1.6-J message builders + status mapping
 test_anomaly.py     # statistical early-warning (incl. no-false-alarm on steady state)
+test_ml_anomaly.py  # unsupervised ML models (DC + EV): <5% false-positive, >95% detection
 ```
 
-plus a compile check of every module and a dashboard build. Green CI auto-deploys the dashboard
-to GitHub Pages.
+plus a compile check of every module, a dashboard build, and a (non-blocking) Docker image build
+of both the lean bench image and the ML image. Green CI auto-deploys the dashboard to GitHub Pages.
 
 ---
 
@@ -165,9 +204,14 @@ voltbridge/
     redfish_gateway.py      # DC management API subscriber (Redfish)
     ocpp_gateway.py  ocpp_csms.py    # EV charging protocol subscriber (OCPP 1.6-J)
     anomaly_detector.py     # statistical early-warning subscriber
+    synth_telemetry.py      # synthetic telemetry generators (DC + EV) for training
+    train_ml_anomaly.py     # trains the unsupervised models -> *.joblib
+    ml_anomaly_detector.py  # ML anomaly subscriber (auto-selects DC/EV model)
+    ml_anomaly_model_dc.joblib  ml_anomaly_model_ev.joblib   # trained models (committed)
     mosquitto.conf          # broker config (TCP 1883 + WebSocket 9001)
-    test_protocols.py  test_gateway.py  test_ocpp.py  test_anomaly.py
-    requirements.txt  MQTT_SETUP.md  DEMO_SCENARIOS.md
+    Dockerfile  Dockerfile.ml  docker-compose.yml   # containerised stack (dc/ev profiles)
+    test_protocols.py  test_gateway.py  test_ocpp.py  test_anomaly.py  test_ml_anomaly.py
+    requirements.txt  MQTT_SETUP.md  DEMO_SCENARIOS.md  DEMO_RUNBOOK.md
   .github/workflows/        # ci.yml + deploy.yml
 ```
 
@@ -200,6 +244,7 @@ obligations on this project's code):
 | python-can | CAN transport | LGPL-3.0 (used as an unmodified library) |
 | paho-mqtt | MQTT publisher/subscriber | EPL-2.0 / EDL-1.0 |
 | Eclipse Mosquitto | MQTT broker | EPL-2.0 / EDL-1.0 |
+| scikit-learn, NumPy, SciPy, joblib | unsupervised ML anomaly models | BSD-3-Clause |
 
 **CAN definitions.** The `acan.dbc` message conventions reference **ACAN**, Ather Energy's
 open-source CAN interface project (MIT). Used at the message-convention level with attribution;

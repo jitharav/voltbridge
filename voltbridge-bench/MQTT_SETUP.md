@@ -183,34 +183,50 @@ that turns raw telemetry into "act before it trips."
 
 ---
 
+---
+
 # ML anomaly detector (unsupervised, covariance / Mahalanobis)
 
-`ml_anomaly_detector.py` is a subscriber that scores each DC-rack telemetry
-sample against a model of NORMAL operation and flags **multivariate** outliers —
-combinations of readings unlike anything in normal operation, even when each
-reading is individually in range. It runs alongside the statistical detector:
+`ml_anomaly_detector.py` scores each telemetry sample against a model of NORMAL
+operation and flags **multivariate** outliers — combinations of readings unlike
+anything in normal operation, even when each reading is individually in range.
+It auto-selects the model by telemetry mode and runs alongside the statistical
+detector:
 
-  * `anomaly_detector.py` → transparent, per-limit early warning (explainable)
-  * `ml_anomaly_detector.py` → novel multivariate deviations (learned)
+  * `anomaly_detector.py`    -> transparent, per-limit early warning (explainable)
+  * `ml_anomaly_detector.py` -> novel multivariate deviations (learned)
 
-## Model
-Unsupervised **EllipticEnvelope** (robust covariance → Mahalanobis distance),
-trained on NORMAL samples only. Synthetic training data reproduces the bench's
-steady-state physics (see `synth_telemetry.py`); retrain on real logged
-telemetry with the same feature vector as it accumulates — no code changes.
-Features: v_bus · i_bus · power_kw · temp · rect_temp · eff.
-Measured: ~1% false-positive rate, 100% detection on held-out synthetic faults.
+## Two models — one per operating envelope
+DC and EV have very different "normal", so each has its own model (trained by
+`train_ml_anomaly.py`):
+
+  * `ml_anomaly_model_dc.joblib` — 800VDC rack, a single EllipticEnvelope
+    (robust covariance / Mahalanobis). Features: v_bus, i_bus, power_kw, temp,
+    rect_temp, eff.
+  * `ml_anomaly_model_ev.joblib` — EV fast-charge, split into TWO sub-models at
+    SoC 80% (constant-current vs constant-voltage), because a charge has two
+    genuinely different normal regimes. Pack-agnostic features (v_ratio, i_frac,
+    temp, soc, eff) so 400 V and 800 V share one model.
+
+Both: ~1% false-positive rate, 100% detection on held-out synthetic faults.
+
+## Where the training data comes from
+It is generated in code (`synth_telemetry.py`) to reproduce the bench's physics
+per domain — nothing is downloaded. The models train on NORMAL samples only;
+fault samples are used purely to measure detection. The same feature vectors let
+you retrain on REAL logged telemetry as it accumulates — no code changes.
 
 ## Run
 ```
 pip install scikit-learn numpy joblib paho-mqtt
-python train_ml_anomaly.py          # once -> ml_anomaly_model.joblib
+python train_ml_anomaly.py          # once -> the two .joblib models
 python ml_anomaly_detector.py       # subscribes; alerts -> voltbridge/alerts (source=ml)
 ```
-With broker + `bench.py --mode dc --mqtt` running, inject a fault and both the
-statistical and ML detectors flag it; watch `mosquitto_sub -t voltbridge/alerts -v`.
+With broker + `bench.py --mqtt` running (DC or EV), inject a fault; the ML
+detector flags it (only during the TRANSFER phase). Watch:
+`mosquitto_sub -t voltbridge/alerts -v`.
 
 ## Scope (honest)
-Unsupervised outlier detection on synthetic normal telemetry — real ML, but
-trained on generated data, not a labeled clinical/production corpus. It is a
-complement to (not a replacement for) the transparent statistical layer.
+Real unsupervised ML, trained on synthetic normal telemetry (not a labeled
+production corpus). It complements — does not replace — the transparent
+statistical layer.

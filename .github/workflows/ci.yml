@@ -75,5 +75,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Build bench image
+      - name: Build bench image (lean, real-time services)
         run: docker build -t voltbridge-bench ./voltbridge-bench
+      - name: Build ML image (analytics)
+        run: docker build -f ./voltbridge-bench/Dockerfile.ml -t voltbridge-bench-ml ./voltbridge-bench
