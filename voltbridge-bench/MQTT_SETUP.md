@@ -180,3 +180,37 @@ in ~Ns") shortly before the bench's F-OT-04 protection trips.
 Classical statistical process control — rolling mean/std, z-score, linear trend.
 Transparent and explainable; NOT a trained ML model. It's an early-warning layer
 that turns raw telemetry into "act before it trips."
+
+---
+
+# ML anomaly detector (unsupervised, covariance / Mahalanobis)
+
+`ml_anomaly_detector.py` is a subscriber that scores each DC-rack telemetry
+sample against a model of NORMAL operation and flags **multivariate** outliers —
+combinations of readings unlike anything in normal operation, even when each
+reading is individually in range. It runs alongside the statistical detector:
+
+  * `anomaly_detector.py` → transparent, per-limit early warning (explainable)
+  * `ml_anomaly_detector.py` → novel multivariate deviations (learned)
+
+## Model
+Unsupervised **EllipticEnvelope** (robust covariance → Mahalanobis distance),
+trained on NORMAL samples only. Synthetic training data reproduces the bench's
+steady-state physics (see `synth_telemetry.py`); retrain on real logged
+telemetry with the same feature vector as it accumulates — no code changes.
+Features: v_bus · i_bus · power_kw · temp · rect_temp · eff.
+Measured: ~1% false-positive rate, 100% detection on held-out synthetic faults.
+
+## Run
+```
+pip install scikit-learn numpy joblib paho-mqtt
+python train_ml_anomaly.py          # once -> ml_anomaly_model.joblib
+python ml_anomaly_detector.py       # subscribes; alerts -> voltbridge/alerts (source=ml)
+```
+With broker + `bench.py --mode dc --mqtt` running, inject a fault and both the
+statistical and ML detectors flag it; watch `mosquitto_sub -t voltbridge/alerts -v`.
+
+## Scope (honest)
+Unsupervised outlier detection on synthetic normal telemetry — real ML, but
+trained on generated data, not a labeled clinical/production corpus. It is a
+complement to (not a replacement for) the transparent statistical layer.
