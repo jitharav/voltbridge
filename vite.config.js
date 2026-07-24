@@ -1,10 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// base: "./" makes asset paths relative so the build works both locally
-// and when served from a GitHub Pages project subpath (/<repo>/).
+// GitHub Pages serves this repo under /voltbridge/, so assets must be based there.
+// For a custom domain at the root later, change base back to "/".
 export default defineConfig({
-  base: "./",
+  base: "/voltbridge/",
   plugins: [react()],
-  server: { port: 5173, open: true },
 });
