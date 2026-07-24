@@ -78,7 +78,20 @@ def main():
     ap.add_argument("--nodes", type=int, nargs="+", default=[10, 50, 100, 250, 500, 1000])
     ap.add_argument("--hz", type=int, default=5)
     ap.add_argument("--secs", type=int, default=3)
+    ap.add_argument("--check", action="store_true",
+                    help="CI mode: assert the pipeline ingests correctly, no benchmark thresholds")
     args = ap.parse_args()
+
+    if args.check:
+        # Fast, machine-independent correctness check for CI.
+        r = run_once(100, hz=5, secs=1)
+        loss = 1.0 - (r["processed"] / max(1, r["produced"]))
+        print(f"[check] produced={r['produced']} processed={r['processed']} "
+              f"loss={loss*100:.2f}% lat_p95={r['lat_ms_p95']}ms")
+        assert r["produced"] > 0, "no telemetry produced"
+        assert loss < 0.02, f"too much telemetry lost in aggregation: {loss*100:.1f}%"
+        print("ok: fleet aggregation ingests telemetry without loss")
+        return
 
     print(f"Fleet scaling harness — {args.hz} Hz/node, {args.secs}s per run\n")
     hdr = f"{'nodes':>6} {'offered/s':>10} {'ingested/s':>11} {'lat_mean_ms':>12} {'lat_p95_ms':>11}"

@@ -178,6 +178,29 @@ npm run build && npm run preview -- --host   # open the printed Network URL on t
 PWA assets live in `public/` (`manifest.webmanifest`, `sw.js`, `icons/`) with a
 mobile stylesheet in `src/mobile.css`; see `voltbridge-mobile-pwa/README_MOBILE.md`.
 
+### Fleet / cloud-native scaling (`fleet/`)
+
+Each bench is a node. The `fleet/` module is a working demonstrator of how nodes
+aggregate at the edge and scale into a cloud backend: **MQTT (edge) → aggregation
+bridge → Kafka → TimescaleDB → fleet dashboard**, with a multi-node simulator, a
+scaling harness, Docker Compose, and Kubernetes manifests.
+
+```bash
+cd fleet
+python scale_test.py                    # in-process scaling curve (no infra)
+docker compose -f docker-compose.fleet.yml up --build   # full pipeline → http://localhost:8090/
+NODES=500 docker compose -f docker-compose.fleet.yml up  # bigger fleet
+docker compose -f docker-compose.fleet.yml up --scale consumer=3   # horizontal consumers
+kubectl apply -f k8s/                   # deploy path (consumer Deployment + HPA)
+```
+
+Measured (single machine, in-process harness): ingest tracks offered load to
+~1,000 nodes at ~5,000 msg/s with single-digit-to-low-tens-of-ms p95 latency.
+Horizontal scale beyond one worker is Kafka partitions + a consumer group.
+**Honest scope:** a local demonstrator of the pipeline and its scaling behaviour
+using the same components as a hyperscaler deployment — not a deployed managed
+cloud system. See `fleet/README_FLEET.md`.
+
 ### Fault injection (CLI)
 
 ```bash

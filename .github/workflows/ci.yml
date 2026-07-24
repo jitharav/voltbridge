@@ -54,6 +54,26 @@ jobs:
         working-directory: voltbridge-bench
         run: python test_ml_anomaly.py
 
+  fleet:
+    name: Fleet PoC (pipeline logic + scaling harness)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install fleet deps (infra-free)
+        working-directory: fleet
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy
+      - name: Compile fleet modules
+        working-directory: fleet
+        run: python -m compileall -q fleet_common.py fleet_simulator.py mqtt_kafka_bridge.py fleet_consumer.py scale_test.py
+      - name: Fleet aggregation correctness check (no Kafka needed)
+        working-directory: fleet
+        run: python scale_test.py --check
+
   build:
     name: Dashboard build
     runs-on: ubuntu-latest
