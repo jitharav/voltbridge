@@ -55,3 +55,10 @@ def fleet_aggregate(latest_by_node):
     return {"nodes": n, "total_power_mw": round(total_kw / 1000.0, 2),
             "healthy": h, "warning": w, "fault": f,
             "mean_temp": round(sum(temps) / n, 1)}
+
+
+def split_by_mode(latest_by_node):
+    """Partition the fleet into DC-rack and EV-charge nodes."""
+    dc = {k: v for k, v in latest_by_node.items() if v.get("mode") == "dc"}
+    ev = {k: v for k, v in latest_by_node.items() if v.get("mode") == "ev"}
+    return dc, ev
