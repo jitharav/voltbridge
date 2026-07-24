@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: consumer, namespace: voltbridge-fleet }
+spec:
+  replicas: 3                       # horizontal scale: 3 consumers share Kafka partitions
+  selector: { matchLabels: { app: consumer } }
+  template:
+    metadata: { labels: { app: consumer } }
+    spec:
+      containers:
+        - name: consumer
+          image: voltbridge-fleet
+          command: ["python","fleet_consumer.py"]
+          env:
+            - { name: KAFKA, value: "kafka:9092" }
+            - { name: GROUP, value: "fleet-consumers" }
+            - { name: DATABASE_URL, value: "postgresql://postgres:voltbridge@timescaledb:5432/fleet" }
+            - { name: PORT, value: "8090" }
+          ports: [ { containerPort: 8090 } ]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: fleet-dashboard, namespace: voltbridge-fleet }
+spec:
+  type: LoadBalancer
+  selector: { app: consumer }
+  ports: [ { port: 80, targetPort: 8090 } ]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: consumer-hpa, namespace: voltbridge-fleet }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: consumer }
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }

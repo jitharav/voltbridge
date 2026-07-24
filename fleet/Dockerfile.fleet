@@ -1,0 +1,6 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements-fleet.txt .
+RUN pip install --no-cache-dir -r requirements-fleet.txt
+COPY fleet_common.py mqtt_kafka_bridge.py fleet_simulator.py fleet_consumer.py ./
+CMD ["python", "fleet_consumer.py"]

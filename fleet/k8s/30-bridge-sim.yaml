@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: bridge, namespace: voltbridge-fleet }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: bridge } }
+  template:
+    metadata: { labels: { app: bridge } }
+    spec:
+      containers:
+        - name: bridge
+          image: voltbridge-fleet
+          command: ["python","mqtt_kafka_bridge.py"]
+          env:
+            - { name: MQTT_BROKER, value: "broker:1883" }
+            - { name: KAFKA, value: "kafka:9092" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: simulator, namespace: voltbridge-fleet }
+spec:
+  replicas: 1                       # scale nodes via NODES; add replicas for more producers
+  selector: { matchLabels: { app: simulator } }
+  template:
+    metadata: { labels: { app: simulator } }
+    spec:
+      containers:
+        - name: simulator
+          image: voltbridge-fleet
+          command: ["python","fleet_simulator.py"]
+          env:
+            - { name: MQTT_BROKER, value: "broker:1883" }
+            - { name: NODES, value: "200" }
+            - { name: HZ, value: "5" }

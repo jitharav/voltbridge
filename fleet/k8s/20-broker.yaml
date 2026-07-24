@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: broker, namespace: voltbridge-fleet }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: broker } }
+  template:
+    metadata: { labels: { app: broker } }
+    spec:
+      containers:
+        - name: mosquitto
+          image: eclipse-mosquitto:2
+          ports: [ { containerPort: 1883 } ]
+          command: ["/usr/sbin/mosquitto"]
+          args: ["-c","/etc/mosquitto/mosquitto.conf"]
+          volumeMounts: [ { name: cfg, mountPath: /etc/mosquitto } ]
+      volumes:
+        - name: cfg
+          configMap: { name: mosquitto-cfg }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: mosquitto-cfg, namespace: voltbridge-fleet }
+data:
+  mosquitto.conf: |
+    listener 1883
+    allow_anonymous true
+---
+apiVersion: v1
+kind: Service
+metadata: { name: broker, namespace: voltbridge-fleet }
+spec:
+  selector: { app: broker }
+  ports: [ { port: 1883, targetPort: 1883 } ]
