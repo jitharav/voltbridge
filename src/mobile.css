@@ -1,0 +1,26 @@
+/* VoltBridge mobile helpers — import once (e.g. in main.jsx: import "./mobile.css").
+   Best-effort responsive layer for phones/tablets; test on a device and tune. */
+
+/* respect notches / safe areas */
+:root { --safe-t: env(safe-area-inset-top); --safe-b: env(safe-area-inset-bottom); }
+html, body { max-width: 100%; overflow-x: hidden; -webkit-text-size-adjust: 100%; }
+body { padding-top: var(--safe-t); padding-bottom: var(--safe-b); }
+
+/* On narrow screens, stack the three main panels (gauges / trace / protocol log)
+   instead of forcing a 3-column row. These target common CSS grid/flex rows;
+   adjust the selectors to match VoltBridge.jsx class names if needed. */
+@media (max-width: 820px) {
+  /* generic: any inline 3-col grid collapses to 1 col */
+  [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+  /* generic: flex rows wrap */
+  [style*="display: flex"], [style*="display:flex"] { flex-wrap: wrap !important; }
+  /* make selector rows and control rows wrap and be tap-friendly */
+  button { min-height: 40px; }
+  /* prevent tiny fonts from being unreadable */
+  .vb-mobile-scale { font-size: 1rem; }
+}
+
+/* comfortable tap targets for the fault / mode / car buttons */
+@media (max-width: 820px) {
+  button, select { touch-action: manipulation; }
+}

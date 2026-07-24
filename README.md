@@ -157,6 +157,27 @@ The broker also exposes WebSocket on `localhost:9001`, so the host dashboard
 broker unchanged. Run one profile at a time (a single bench owns the telemetry
 topic).
 
+> The full stack has been verified running locally via Docker Desktop (WSL 2
+> backend) as well as building in CI. On Windows, Docker Desktop needs the
+> "Virtual Machine Platform" feature and WSL 2 (`wsl --install`); on a corporate
+> VM this requires nested virtualization to be available. If Docker cannot start
+> in your environment, the manual multi-terminal setup above is a complete
+> substitute, and CI still builds the images.
+
+### Run on a phone / tablet (PWA)
+
+The dashboard can be installed as a Progressive Web App. In `standalone` mode it
+runs entirely in the browser (no backend), so it works offline and is ideal for a
+portable demo. Build and serve, then use the browser's *Add to Home screen* /
+*Install app*:
+
+```bash
+npm run build && npm run preview -- --host   # open the printed Network URL on the phone
+```
+
+PWA assets live in `public/` (`manifest.webmanifest`, `sw.js`, `icons/`) with a
+mobile stylesheet in `src/mobile.css`; see `voltbridge-mobile-pwa/README_MOBILE.md`.
+
 ### Fault injection (CLI)
 
 ```bash
@@ -185,8 +206,9 @@ test_anomaly.py     # statistical early-warning (incl. no-false-alarm on steady 
 test_ml_anomaly.py  # unsupervised ML models (DC + EV): <5% false-positive, >95% detection
 ```
 
-plus a compile check of every module, a dashboard build, and a (non-blocking) Docker image build
-of both the lean bench image and the ML image. Green CI auto-deploys the dashboard to GitHub Pages.
+plus a compile check of every module, a dashboard build, validation of both Docker
+Compose profiles, and a Docker image build of the lean bench image and the ML image.
+Green CI auto-deploys the dashboard to GitHub Pages.
 
 ---
 

@@ -70,11 +70,16 @@ jobs:
           npm run build
 
   docker:
-    name: Docker image builds
+    name: Docker images + compose
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - name: Validate compose (dc profile)
+        working-directory: voltbridge-bench
+        run: docker compose --profile dc config >/dev/null
+      - name: Validate compose (ev profile)
+        working-directory: voltbridge-bench
+        run: docker compose --profile ev config >/dev/null
       - name: Build bench image (lean, real-time services)
         run: docker build -t voltbridge-bench ./voltbridge-bench
       - name: Build ML image (analytics)
