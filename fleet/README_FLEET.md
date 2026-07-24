@@ -96,3 +96,33 @@ deployable to Kubernetes.
 **Does not prove:** production behaviour on a managed hyperscaler cluster at large
 N under real network conditions — that is Tier 2/3 (managed Kafka, load test,
 SLA-driven tuning) and requires cloud provisioning and sign-off.
+
+## Third-party components & licenses
+
+This PoC composes existing open-source infrastructure; it does not vendor or
+modify any of it. The images/libraries are pulled at build/run time. Licenses
+(verify before any redistribution or commercial deployment):
+
+| Component | Role | License |
+|---|---|---|
+| Apache Kafka (`apache/kafka` image) | streaming backbone | Apache-2.0 |
+| TimescaleDB (`timescale/timescaledb` image) | time-series store | Apache-2.0 (community; some features under the Timescale License) |
+| PostgreSQL (TimescaleDB base) | database engine | PostgreSQL License (BSD-like) |
+| Eclipse Mosquitto (`eclipse-mosquitto` image) | MQTT broker | EPL-2.0 / EDL-1.0 |
+| kafka-python | Kafka client | Apache-2.0 |
+| paho-mqtt (Eclipse Paho) | MQTT client | EPL-2.0 / EDL-1.0 |
+| psycopg2-binary | Postgres driver | LGPL-3.0 (with linking exception) |
+| numpy | telemetry generation | BSD-3-Clause |
+
+Notes:
+- All components are permissively or weakly-copyleft licensed and are used
+  unmodified as separate services/dependencies (no static linking into a
+  proprietary binary), which keeps integration clean for a PoC.
+- **TimescaleDB**: the community edition is Apache-2.0; a few advanced features
+  ship under the source-available Timescale License (TSL). This PoC uses only
+  standard hypertable/SQL features. Confirm edition/features if deploying.
+- **psycopg2** is LGPL-3.0 (with an exception); it is used as an unmodified,
+  separately-installed dependency. If LGPL is a concern for your distribution
+  model, `psycopg` (psycopg3) offers an LGPL alternative as well — same usage.
+- This is a demonstrator, not a distributed product. For any productization,
+  have the component licenses reviewed against your intended distribution.

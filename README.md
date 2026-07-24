@@ -199,7 +199,10 @@ Measured (single machine, in-process harness): ingest tracks offered load to
 Horizontal scale beyond one worker is Kafka partitions + a consumer group.
 **Honest scope:** a local demonstrator of the pipeline and its scaling behaviour
 using the same components as a hyperscaler deployment — not a deployed managed
-cloud system. See `fleet/README_FLEET.md`.
+cloud system. Third-party components (Apache Kafka — Apache-2.0; TimescaleDB —
+Apache-2.0/community; Mosquitto — EPL-2.0/EDL-1.0; kafka-python — Apache-2.0;
+paho-mqtt — EPL-2.0/EDL-1.0; psycopg2 — LGPL-3.0; numpy — BSD-3) are used
+unmodified; see `fleet/README_FLEET.md` for the full licence table and scope.
 
 ### Fault injection (CLI)
 
